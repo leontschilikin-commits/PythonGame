@@ -1,4 +1,4 @@
-import json, sys
+import json, os, sys
 sys.path.insert(0, ".")
 from levels import LEVELS, SHOP
 from runner import run
@@ -24,4 +24,6 @@ for k, v in (("/*LEVELS*/", js(LEVELS)), ("/*SHOP*/", js(SHOP)), ("/*BOOK*/", js
     assert k in t, k
     t = t.replace(k, v)
 open(out, "w", encoding="utf-8").write(t)
+# GitHub Pages öffnet unter der kurzen Adresse die index.html im selben Ordner
+open(os.path.join(os.path.dirname(out), "index.html"), "w", encoding="utf-8").write(t)
 print("ok", len(t))
