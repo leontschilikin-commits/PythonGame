@@ -1,0 +1,12 @@
+{
+  "name": "Rohstoff-Quest",
+  "short_name": "Rohstoff-Quest",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0d3147",
+  "theme_color": "#0d3147",
+  "icons": [
+    { "src": "apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "rohstoff-quest-icon.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
