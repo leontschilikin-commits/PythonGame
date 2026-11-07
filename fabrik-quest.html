@@ -1,0 +1,986 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Fabrik-Quest</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700&family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/show-hint.css">
+<style>
+  :root {
+    --bg:#0e1013; --steel:#1b1f25; --steel2:#262b33; --edge:#3a414c; --edge-hi:#59616e;
+    --text:#e8e4da; --mut:#8f949c; --amber:#ffa726; --amber2:#c97a10; --ok:#6fcf6a; --bad:#ff6b5e; --warn:#ffd166;
+    --ide:#16181d; --ide2:#1d2026; --ide3:#24282f; --ide-line:#2d323a;
+    --hud:"Chakra Petch",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  }
+  * { box-sizing:border-box; }
+  html,body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 Inter,-apple-system,"Segoe UI",sans-serif; display:flex; flex-direction:column; overflow:hidden; }
+  button { font:inherit; color:inherit; cursor:pointer; }
+
+  /* ---------- HUD ---------- */
+  #hud { flex:none; height:58px; display:flex; align-items:center; gap:18px; padding:0 16px; background:linear-gradient(#2a2f37,#191c21); border-bottom:2px solid #000; box-shadow:0 1px 0 var(--edge), 0 4px 14px rgba(0,0,0,.6); position:relative; z-index:5; }
+  #logo { font:700 20px var(--hud); letter-spacing:1.5px; color:var(--amber); text-shadow:0 2px 0 #5c3800; white-space:nowrap; text-transform:uppercase; }
+  #logo span { color:var(--text); }
+  #track { display:flex; align-items:center; flex:1; justify-content:center; min-width:0; }
+  .node { position:relative; width:36px; height:36px; flex:none; border:2px solid var(--edge); border-radius:8px; background:linear-gradient(#333943,#20242a); font:700 15px var(--hud); box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 2px 0 #000; padding:0; }
+  .node:hover:not(:disabled) { border-color:var(--amber); }
+  .node.done { border-color:#3f7d3c; background:linear-gradient(#2d4b2c,#1c301c); }
+  .node.cur { border-color:var(--amber); color:var(--amber); box-shadow:0 0 12px rgba(255,167,38,.55),inset 0 1px 0 rgba(255,255,255,.1); }
+  .node:disabled { opacity:.4; cursor:not-allowed; }
+  .node small { position:absolute; left:0; right:0; bottom:-13px; font-size:9px; letter-spacing:0; color:var(--warn); line-height:12px; white-space:nowrap; }
+  .link { width:16px; height:4px; flex:none; background:var(--edge); }
+  .link.done { background:#3f7d3c; }
+  #score { font:700 17px var(--hud); color:var(--warn); white-space:nowrap; }
+  .hudbtn { background:var(--steel2); border:1px solid var(--edge); border-radius:6px; width:34px; height:34px; padding:0; }
+
+  /* ---------- Layout ---------- */
+  #layout { flex:1; min-height:0; display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,1fr); }
+  #gameCol { display:flex; flex-direction:column; min-height:0; min-width:0; border-right:2px solid #000; }
+
+  /* ---------- Welt ---------- */
+  #world { flex:1; min-height:220px; padding:72px 12px 36px; position:relative; display:flex; align-items:center; justify-content:center; overflow:hidden;
+    background:#14181b radial-gradient(circle at 50% 40%,#232b2c,#0d1012 75%); }
+  #cv { display:block; border-radius:6px; box-shadow:0 0 0 2px #000,0 0 0 4px var(--edge),0 12px 32px rgba(0,0,0,.7); }
+  .panelHud { position:absolute; top:10px; background:rgba(14,16,19,.88); border:1px solid var(--edge); border-radius:6px; padding:7px 11px; font-family:var(--hud); z-index:2; pointer-events:none; backdrop-filter:blur(3px); }
+  #goals { left:10px; min-width:190px; }
+  #clock { right:10px; }
+  .plabel { font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:var(--mut); }
+  .goal { display:flex; align-items:center; gap:7px; font-weight:700; font-size:14px; margin-top:3px; }
+  .goal .swatch { width:11px; height:11px; border-radius:3px; border:1px solid rgba(0,0,0,.7); flex:none; }
+  .goal .num { margin-left:auto; font-variant-numeric:tabular-nums; }
+  .goal.ok { color:var(--ok); }
+  .meter { height:6px; background:#000; border-radius:3px; overflow:hidden; margin-top:3px; }
+  .meter i { display:block; height:100%; width:0; background:var(--amber); }
+  .ok .meter i, .goal.ok + .meter i { background:var(--ok); }
+  #clockNum { font-weight:700; font-size:14px; font-variant-numeric:tabular-nums; }
+  #hover { position:absolute; left:10px; bottom:10px; background:rgba(14,16,19,.88); border:1px solid var(--edge); border-radius:6px; padding:3px 9px; font:12px var(--mono); z-index:2; pointer-events:none; display:none; }
+  #toast { position:absolute; left:50%; bottom:12px; transform:translateX(-50%); background:rgba(14,16,19,.94); border:1px solid var(--edge); border-radius:6px; padding:6px 14px; font:600 13px var(--hud); z-index:2; display:none; max-width:82%; text-align:center; }
+  #toast.bad { border-color:var(--bad); color:#ffb8b0; } #toast.good { border-color:var(--ok); color:#bdf0b9; } #toast.info { border-color:var(--amber2); color:#ffd9a0; }
+
+  #controls { flex:none; display:flex; gap:6px; align-items:center; padding:7px 10px; background:var(--steel); border-top:2px solid #000; border-bottom:1px solid #000; font-family:var(--hud); }
+  .cbtn { background:linear-gradient(#333943,#22262d); border:1px solid var(--edge); border-radius:5px; padding:4px 11px; font-weight:700; font-size:13px; box-shadow:0 2px 0 #000; }
+  .cbtn:hover { border-color:var(--amber); }
+  .cbtn:active { transform:translateY(2px); box-shadow:none; }
+  .cbtn.on { background:linear-gradient(var(--amber),var(--amber2)); color:#201300; border-color:var(--amber); }
+  #nextInline { margin-left:auto; display:none; }
+
+  /* ---------- Auftrag ---------- */
+  #mission { flex:none; height:38%; min-height:150px; overflow:auto; background:var(--steel); padding:12px 16px; }
+  #ltitle { margin:0 0 7px; font:700 18px var(--hud); color:var(--amber); }
+  #task { background:#2a2315; border-left:3px solid var(--amber); padding:7px 11px; border-radius:0 5px 5px 0; margin-bottom:9px; }
+  #lesson { color:#c3c7cc; }
+  #mission code { background:var(--steel2); padding:1px 5px; border-radius:4px; font:12.5px var(--mono); color:#ffd98a; }
+  #mission pre { background:var(--ide); border:1px solid var(--ide-line); border-radius:5px; padding:8px 11px; margin:7px 0; font:12.5px/1.5 var(--mono); overflow:auto; color:#d7dae0; }
+  #missionBtns { display:flex; gap:6px; margin-top:9px; flex-wrap:wrap; font-family:var(--hud); }
+  #tip { display:none; margin-top:8px; color:var(--warn); font-size:13px; }
+  #starInfo { margin-top:9px; font-size:12px; color:var(--mut); }
+
+  /* ---------- IDE ---------- */
+  #ide { display:flex; flex-direction:column; min-height:0; min-width:0; background:var(--ide); font-family:Inter,sans-serif; }
+  #titlebar { flex:none; height:30px; display:flex; align-items:center; gap:7px; padding:0 11px; background:var(--ide3); font-size:12px; color:var(--mut); }
+  .dot { width:11px; height:11px; border-radius:50%; } .dot.r{background:#ff5f57} .dot.y{background:#febc2e} .dot.g{background:#28c840}
+  #titleText { flex:1; text-align:center; margin-right:47px; }
+  #tabs { flex:none; display:flex; background:var(--ide2); border-bottom:1px solid #000; }
+  .tab { padding:7px 14px; font-size:12.5px; background:var(--ide); border-top:2px solid var(--amber); border-right:1px solid #000; display:flex; align-items:center; gap:7px; }
+  .tab .py { color:#6db3ff; font:700 11px var(--mono); }
+  #dirty { width:7px; height:7px; border-radius:50%; background:var(--mut); }
+  #breadcrumb { flex:none; padding:3px 14px; font-size:11.5px; color:var(--mut); border-bottom:1px solid var(--ide-line); }
+  #editor { flex:1; min-height:120px; position:relative; }
+  #editor .CodeMirror { position:absolute; inset:0; height:auto; }
+  #panelHead { flex:none; display:flex; align-items:center; gap:16px; padding:0 14px; height:29px; background:var(--ide2); border-top:1px solid #000; font-size:11px; letter-spacing:.8px; text-transform:uppercase; color:var(--mut); }
+  #panelHead b { color:var(--text); font-weight:600; border-bottom:2px solid var(--amber); padding:6px 0 5px; }
+  #probBadge { background:var(--bad); color:#000; border-radius:8px; padding:0 6px; font-weight:700; display:none; letter-spacing:0; }
+  #checks { margin-left:auto; display:flex; gap:10px; text-transform:none; letter-spacing:0; font-size:12px; min-width:0; overflow:hidden; white-space:nowrap; }
+  .chk.ok { color:var(--ok); }
+  #terminal { flex:none; height:26%; min-height:90px; overflow:auto; padding:7px 14px; font:12.5px/1.55 var(--mono); white-space:pre-wrap; background:#121317; color:#c8ccd2; }
+  #terminal .pr { color:var(--ok); } #terminal .cmd { color:#8f949c; }
+  #terminal .err { color:var(--bad); } #terminal .soft { color:var(--warn); } #terminal .ghost { color:#60656d; }
+  #statusbar { flex:none; height:24px; display:flex; align-items:center; gap:14px; padding:0 11px; background:#7a4b05; color:#ffe9c7; font-size:11.5px; }
+  #statusbar.err { background:#8c2a22; } #statusbar.ok { background:#2b6b34; }
+  #sig { flex:1; font-family:var(--mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+  /* Editor-Farbschema */
+  .cm-s-fabrik.CodeMirror { background:var(--ide); color:#d7dae0; font:14px/1.6 var(--mono); }
+  .cm-s-fabrik .CodeMirror-gutters { background:var(--ide); border-right:1px solid var(--ide-line); }
+  .cm-s-fabrik .CodeMirror-linenumber { color:#565c66; }
+  .cm-s-fabrik .CodeMirror-cursor { border-left:2px solid var(--amber); }
+  .cm-s-fabrik .CodeMirror-selected, .cm-s-fabrik .CodeMirror-focused .CodeMirror-selected { background:#37404e; }
+  .cm-s-fabrik .CodeMirror-activeline-background { background:#1e2127; }
+  .cm-s-fabrik .CodeMirror-activeline-gutter .CodeMirror-linenumber { color:#c8ccd2; }
+  .cm-s-fabrik .CodeMirror-matchingbracket { color:#fff !important; background:#45505f; }
+  .cm-s-fabrik .cm-keyword { color:#ff8f6b; font-weight:600; } .cm-s-fabrik .cm-def { color:#ffd166; }
+  .cm-s-fabrik .cm-builtin { color:#6db3ff; } .cm-s-fabrik .cm-string { color:#9ad982; }
+  .cm-s-fabrik .cm-number { color:#d7a6ff; } .cm-s-fabrik .cm-comment { color:#646b76; font-style:italic; }
+  .cm-s-fabrik .cm-operator { color:#ff8f6b; } .cm-s-fabrik .cm-variable { color:#d7dae0; }
+  .cm-s-fabrik .cm-variable-2 { color:#7fd6d0; } .cm-s-fabrik .cm-property { color:#6db3ff; }
+  .cm-s-fabrik .cm-api { color:#ffb454; font-weight:600; }
+  .cm-s-fabrik .errLine.errLine { background:rgba(255,107,94,.2); } .cm-s-fabrik .softLine.softLine { background:rgba(255,209,102,.12); }
+  #editor .err { width:16px; }
+  .gmark { display:block; text-align:center; font-size:11px; line-height:22px; }
+  .CodeMirror-hints { background:var(--ide3); border:1px solid var(--edge); font:13px var(--mono); box-shadow:0 6px 18px rgba(0,0,0,.6); z-index:30; }
+  .CodeMirror-hint { color:#d7dae0; padding:2px 8px; }
+  li.CodeMirror-hint-active { background:#7a4b05; color:#fff; }
+
+  /* ---------- Overlays ---------- */
+  .overlay { position:fixed; inset:0; z-index:20; display:none; align-items:center; justify-content:center; background:rgba(5,6,8,.78); backdrop-filter:blur(4px); }
+  .overlay.show { display:flex; }
+  .plate { background:linear-gradient(#2c323a,#191c21); border:2px solid var(--edge-hi); border-radius:10px; padding:26px 38px; text-align:center; font-family:var(--hud); box-shadow:0 20px 60px #000, inset 0 1px 0 rgba(255,255,255,.12); max-width:480px; }
+  .plate h1 { margin:0; font-size:44px; color:var(--amber); letter-spacing:3px; text-transform:uppercase; text-shadow:0 3px 0 #5c3800; line-height:1.1; }
+  .plate h2 { margin:0 0 5px; font-size:30px; color:var(--ok); letter-spacing:1px; text-transform:uppercase; }
+  .plate p { font-family:Inter,sans-serif; color:#c3c7cc; margin:12px 0 20px; }
+  .bigbtn { background:linear-gradient(var(--amber),var(--amber2)); color:#201300; border:0; border-radius:6px; padding:11px 26px; font:700 17px var(--hud); box-shadow:0 4px 0 #6b4105; letter-spacing:.5px; }
+  .bigbtn:active { transform:translateY(4px); box-shadow:none; }
+  .bigbtn:disabled { filter:grayscale(1) brightness(.7); cursor:wait; }
+  .ghostbtn { background:none; border:1px solid var(--edge-hi); border-radius:6px; padding:10px 18px; font:700 14px var(--hud); margin-right:7px; }
+  #stars { font-size:48px; letter-spacing:6px; line-height:1.2; }
+  #stars span { color:#3c424b; display:inline-block; }
+  #stars span.on { color:var(--warn); text-shadow:0 0 16px rgba(255,209,102,.7); animation:pop .45s cubic-bezier(.2,1.7,.5,1) backwards; }
+  #stars span:nth-child(2) { animation-delay:.25s; } #stars span:nth-child(3) { animation-delay:.5s; }
+  @keyframes pop { from { transform:scale(0) rotate(-40deg); } }
+  #starRows { font:13px Inter,sans-serif; text-align:left; margin:10px auto 18px; display:inline-block; }
+  #starRows div { color:var(--mut); } #starRows div.on { color:#e8e4da; }
+
+  @media (max-width:1000px) { body{overflow:auto;} #layout{display:block;} #world{height:52vh;} #mission{height:auto;} #ide{height:90vh;} #logo span{display:none;} }
+</style>
+</head>
+<body>
+<div id="hud">
+  <div id="logo">Fabrik<span>-Quest</span></div>
+  <div id="track"></div>
+  <div id="score">★ 0</div>
+  <button class="hudbtn" id="mute" title="Ton an/aus">🔊</button>
+</div>
+
+<div id="layout">
+  <div id="gameCol">
+    <div id="world">
+      <canvas id="cv"></canvas>
+      <div class="panelHud" id="goals"></div>
+      <div class="panelHud" id="clock"><div class="plabel">Laufzeit</div><div id="clockNum">0 Ticks</div></div>
+      <div id="hover"></div>
+      <div id="toast"></div>
+    </div>
+    <div id="controls">
+      <button class="cbtn" id="replayBtn">↻ Neu abspielen</button>
+      <button class="cbtn spd on" data-s="1">1×</button>
+      <button class="cbtn spd" data-s="3">3×</button>
+      <button class="cbtn spd" data-s="10">10×</button>
+      <button class="cbtn on" id="nextInline">Nächstes Level →</button>
+    </div>
+    <div id="mission">
+      <h2 id="ltitle"></h2>
+      <div id="task"></div>
+      <div id="lesson"></div>
+      <div id="missionBtns">
+        <button class="cbtn" id="tipBtn">💡 Tipp</button>
+        <button class="cbtn" id="solBtn">Lösung zeigen</button>
+        <button class="cbtn" id="resetBtn">Zurücksetzen</button>
+      </div>
+      <div id="tip"></div>
+      <div id="starInfo"></div>
+    </div>
+  </div>
+
+  <div id="ide">
+    <div id="titlebar"><i class="dot r"></i><i class="dot y"></i><i class="dot g"></i><span id="titleText">fabrik.py — Fabrik-Quest</span></div>
+    <div id="tabs"><div class="tab"><span class="py">py</span>fabrik.py<i id="dirty"></i></div></div>
+    <div id="breadcrumb"></div>
+    <div id="editor"></div>
+    <div id="panelHead"><b>Terminal</b><span id="probBadge">1</span><div id="checks"></div></div>
+    <div id="terminal"></div>
+    <div id="statusbar"><span id="runState">● Lädt</span><span id="sig"></span><span id="pos">Zeile 1, Spalte 1</span><span>Leerzeichen: 4</span><span>Python 3</span></div>
+  </div>
+</div>
+
+<div class="overlay show" id="startScreen"><div class="plate">
+  <h1>Fabrik<br>Quest</h1>
+  <p>Deine Fabrik gehorcht nur einem: <b>Python-Code</b>. Schreibe Baupläne, stelle Maschinen auf und steigere die Produktion. Dabei lernst du die Grundlagen, ganz nebenbei.</p>
+  <button class="bigbtn" id="startBtn" disabled>Python wird geladen …</button>
+</div></div>
+
+<div class="overlay" id="winScreen"><div class="plate">
+  <h2>Schicht geschafft!</h2>
+  <div id="stars"><span>★</span><span>★</span><span>★</span></div>
+  <div id="starRows"></div>
+  <div><button class="ghostbtn" id="stayBtn">Code verbessern</button><button class="bigbtn" id="nextBtn">Nächstes Level →</button></div>
+</div></div>
+
+<script type="application/json" id="levels-data">[{"title": "Der erste Bohrer", "lesson": "Hier baust du nicht von Hand, du schreibst <b>Code<\/b>, der Maschinen aufstellt. Der Befehl dafür:<pre>platziere(\"bohrer\", 2, 1, \"rechts\")<\/pre>Das sind <b>Argumente<\/b> in Klammern: <i>was<\/i> gebaut wird, dann <code>x<\/code> (nach rechts) und <code>y<\/code> (nach unten), zuletzt die <i>Richtung<\/i>, in die die Maschine ihre Ware ausgibt. Text steht immer in <code>\"Anführungszeichen\"<\/code>. Das Feld oben links ist (0, 0).", "task": "Setze einen Bohrer auf das blaue Erzfeld und stelle direkt rechts daneben eine <code>\"kiste\"<\/code> (die Kiste braucht keine Richtung).", "tip": "Bohrer auf (2, 1) Richtung \"rechts\", Kiste auf (3, 1).", "grid": [".......", ".ee..#.", ".ee....", "......."], "erlaubt": ["bohrer", "kiste"], "ziel": {"eisenerz": 5}, "ticks": 3000, "needs": [], "start": "# Entferne das # vor der Zeile, dann läuft sie:\n# platziere(\"bohrer\", 2, 1, \"rechts\")\n", "solution": "platziere(\"bohrer\", 2, 1, \"rechts\")\nplatziere(\"kiste\", 3, 1)\n", "par_ticks": 100, "par_lines": 2}, {"title": "Förderbänder und Schleifen", "lesson": "Die Kiste ist weit weg. Du brauchst ein <code>\"band\"<\/code> Feld für Feld, aber 8 Mal fast dieselbe Zeile zu tippen ist mühsam. Eine <b>for-Schleife<\/b> wiederholt Code:<pre>for x in range(2, 5):\n    print(x)<\/pre><code>x<\/code> nimmt nacheinander die Werte 2, 3, 4 an (die Endzahl 5 gehört <i>nicht<\/i> mehr dazu!). Der <b>eingerückte<\/b> Block darunter wird jedes Mal ausgeführt.", "task": "Bohrer auf (1, 1), dann Bänder in Reihe 1 von x = 2 bis 9, am Ende eine Kiste auf (10, 1). Alles zeigt nach rechts.", "tip": "for x in range(2, 10):  und darunter eingerückt platziere(\"band\", x, 1, \"rechts\")", "grid": ["............", "ee..........", "............", "...###......"], "erlaubt": ["bohrer", "kiste", "band"], "ziel": {"eisenerz": 8}, "ticks": 3000, "needs": [{"type": "code", "pattern": "\\bfor\\b", "label": "Benutze eine for-Schleife"}], "start": "platziere(\"bohrer\", 1, 1, \"rechts\")\n\n", "solution": "platziere(\"bohrer\", 1, 1, \"rechts\")\nfor x in range(2, 10):\n    platziere(\"band\", x, 1, \"rechts\")\nplatziere(\"kiste\", 10, 1)\n", "par_ticks": 192, "par_lines": 4}, {"title": "Der Schmelzofen", "lesson": "Erz allein ist wenig wert, im <code>\"ofen\"<\/code> wird daraus Platten. Der Ofen nimmt Erz von einem Band an und gibt die Platte in seine Richtung aus. Damit du nicht überall dieselbe Zahl tippst, speicherst du sie in einer <b>Variable<\/b>:<pre>y = 2\nplatziere(\"band\", 4, y, \"rechts\")<\/pre>Ändert sich die Reihe, änderst du nur eine Zeile.", "task": "Baue die Linie in Reihe <code>y = 2<\/code>: Bohrer (1) → Bänder (2-5) → Ofen (6) → Bänder (7-9) → Kiste (10). Nutze eine Variable für y.", "tip": "y = 2 an den Anfang. Dann überall y statt der 2 einsetzen.", "grid": ["............", "....##......", "ee..........", "............", "......#....."], "erlaubt": ["bohrer", "kiste", "band", "ofen"], "ziel": {"eisenplatte": 6}, "ticks": 3000, "needs": [{"type": "code", "pattern": "^\\s*\\w+\\s*=\\s*\\d+", "label": "Benutze eine Variable (z.B. y = 2)"}], "start": "y = 2\n", "solution": "y = 2\nplatziere(\"bohrer\", 1, y, \"rechts\")\nfor x in range(2, 6):\n    platziere(\"band\", x, y, \"rechts\")\nplatziere(\"ofen\", 6, y, \"rechts\")\nfor x in range(7, 10):\n    platziere(\"band\", x, y, \"rechts\")\nplatziere(\"kiste\", 10, y)\n", "par_ticks": 192, "par_lines": 8}, {"title": "Mehr Bohrer, mehr Erz", "lesson": "Ein Bohrer liefert nur alle 20 Ticks ein Erz, das dauert. Aber ein Erzfeld hat viele Felder! In der Schleife kannst du mehrere Zeilen pro Durchlauf ausführen, und die Schleifenvariable ist auch eine Koordinate:<pre>for y in range(1, 5):\n    platziere(\"bohrer\", 1, y, \"rechts\")\n    platziere(\"band\", 2, y, \"runter\")<\/pre>Beachte die Richtung <code>\"runter\"<\/code>: Bänder fangen Waren von den Seiten auf.", "task": "Bohrer auf alle 4 Erzreihen (x = 1, y = 1 bis 4), eine Bandspalte daneben (x = 2, nach unten), dann Bänder in Reihe 5 nach rechts (x = 2 bis 7) und eine Kiste auf (8, 5).", "tip": "Eine Schleife für Bohrer+Spalte, eine zweite für die Reihe unten.", "grid": [".........", "ee.......", "ee.......", "ee.......", "ee.......", ".........", "..#......"], "erlaubt": ["bohrer", "kiste", "band"], "ziel": {"eisenerz": 60}, "ticks": 3000, "needs": [{"type": "code", "pattern": "\\bfor\\b", "label": "Benutze eine for-Schleife"}], "start": "", "solution": "for y in range(1, 5):\n    platziere(\"bohrer\", 1, y, \"rechts\")\n    platziere(\"band\", 2, y, \"runter\")\nfor x in range(2, 8):\n    platziere(\"band\", x, 5, \"rechts\")\nplatziere(\"kiste\", 8, 5)\n", "par_ticks": 340, "par_lines": 6}, {"title": "Funktionen: Baupläne", "lesson": "Drei Erzvorkommen, drei gleiche Linien. Statt alles dreimal zu kopieren, schreibst du einmal einen <b>Bauplan<\/b>, eine <b>Funktion<\/b>:<pre>def linie(y):\n    platziere(\"bohrer\", 1, y, \"rechts\")\n    # ...<\/pre><code>y<\/code> ist ein <b>Parameter<\/b>, ein Platzhalter, den du beim Aufruf füllst: <code>linie(1)<\/code>, <code>linie(3)<\/code>. Vergiss den Doppelpunkt und die Einrückung nicht.", "task": "Schreibe <code>def linie(y)<\/code>, die Bohrer → Bänder → Ofen → Bänder → Kiste wie in Level 3 baut, und rufe sie für die Reihen 1, 3 und 5 auf.", "tip": "Die Zeilen aus Level 3 in den def-Block kopieren (eingerückt), dann linie(1) linie(3) linie(5).", "grid": ["............", "ee..........", "............", "ee..........", "............", "ee..........", "............"], "erlaubt": ["bohrer", "kiste", "band", "ofen"], "ziel": {"eisenplatte": 70}, "ticks": 3000, "needs": [{"type": "code", "pattern": "\\bdef\\s+\\w+\\s*\\(", "label": "Definiere eine eigene Funktion mit def"}], "start": "def linie(y):\n    \n\n", "solution": "def linie(y):\n    platziere(\"bohrer\", 1, y, \"rechts\")\n    for x in range(2, 6):\n        platziere(\"band\", x, y, \"rechts\")\n    platziere(\"ofen\", 6, y, \"rechts\")\n    for x in range(7, 10):\n        platziere(\"band\", x, y, \"rechts\")\n    platziere(\"kiste\", 10, y)\n\nlinie(1)\nlinie(3)\nlinie(5)\n", "par_ticks": 624, "par_lines": 11}, {"title": "Listen: Erz finden", "lesson": "Die Erzfelder liegen verstreut, und Kupfer ist auch dabei. Die Funktion <code>finde_erz(\"eisen\")<\/code> gibt dir eine <b>Liste<\/b> aller Eisen-Koordinaten zurück, jeweils als Paar (x, y). Eine Liste durchläufst du mit for:<pre>for x, y in finde_erz(\"eisen\"):\n    print(x, y)<\/pre>Das Ergebnis von <code>print<\/code> siehst du unter dem Editor.", "task": "Setze auf jedes <i>Eisen<\/i>-Feld einen Bohrer (Richtung \"rechts\"). Daneben liegt in Spalte x = 2 von y = 0 bis 7 eine Bandspalte nach unten, am Ende eine Kiste auf (2, 8).", "tip": "Eine Schleife über finde_erz(\"eisen\"), eine über range(0, 8) für die Bänder.", "grid": ["........", ".e......", ".k......", ".e......", ".e......", ".k......", ".e......", "........", "........"], "erlaubt": ["bohrer", "kiste", "band"], "ziel": {"eisenerz": 50}, "ticks": 3000, "needs": [{"type": "code", "pattern": "finde_erz", "label": "Benutze finde_erz(...)"}, {"type": "code", "pattern": "\\bfor\\b", "label": "Benutze eine for-Schleife"}], "start": "for x, y in finde_erz(\"eisen\"):\n    print(x, y)\n", "solution": "for x, y in finde_erz(\"eisen\"):\n    platziere(\"bohrer\", x, y, \"rechts\")\nfor y in range(0, 8):\n    platziere(\"band\", 2, y, \"runter\")\nplatziere(\"kiste\", 2, 8)\n", "par_ticks": 276, "par_lines": 5}, {"title": "Entscheidungen mit if", "lesson": "In dieser Reihe wechseln sich Eisen und Kupfer ab, aber du willst nur <b>Eisenplatten<\/b>. Mit <code>if<\/code> führst du Code nur aus, wenn eine Bedingung stimmt:<pre>if erz_bei(x, 2) == \"eisen\":\n    platziere(\"bohrer\", x, 2, \"runter\")<\/pre><code>erz_bei(x, y)<\/code> liefert \"eisen\", \"kupfer\" oder <code>None<\/code>. Achtung: Vergleichen schreibt man mit <b>zwei<\/b> Gleichzeichen <code>==<\/code>.", "task": "Gehe die Reihe 2 (x = 0 bis 5) durch und baue Bohrer (Richtung \"runter\") nur auf Eisen. Darunter läuft ein Band in Reihe 3 (x = 0 bis 7) nach rechts, dann Ofen (8, 3), Bänder (9, 10), Kiste (11, 3).", "tip": "for x in range(0, 6): if erz_bei(x, 2) == \"eisen\": platziere(...)", "grid": ["............", "............", "ekekek......", "............", "............"], "erlaubt": ["bohrer", "kiste", "band", "ofen"], "ziel": {"eisenplatte": 20}, "ticks": 3000, "needs": [{"type": "code", "pattern": "\\bif\\b", "label": "Benutze if"}], "start": "for x in range(0, 6):\n    \n", "solution": "for x in range(0, 6):\n    if erz_bei(x, 2) == \"eisen\":\n        platziere(\"bohrer\", x, 2, \"runter\")\nfor x in range(0, 8):\n    platziere(\"band\", x, 3, \"rechts\")\nplatziere(\"ofen\", 8, 3, \"rechts\")\nplatziere(\"band\", 9, 3, \"rechts\")\nplatziere(\"band\", 10, 3, \"rechts\")\nplatziere(\"kiste\", 11, 3)\n", "par_ticks": 524, "par_lines": 9}, {"title": "Zahnräder", "lesson": "Der <code>\"montierer\"<\/code> macht aus 2 Eisenplatten ein <b>Zahnrad<\/b> (dauert 30 Ticks). Eine Produktionskette ist jetzt: Bohrer → Band → Ofen → Band → Montierer → Band → Kiste.", "task": "Baue die Kette in Reihe <code>y = 2<\/code>: Bohrer (1), Bänder (2-4), Ofen (5), Bänder (6-7), Montierer (8), Bänder (9-11), Kiste (12). Alles nach rechts.", "tip": "Wie Level 3, nur mit dem Montierer in der Mitte.", "grid": ["..............", "..............", "ee............", "..............", "..#..........."], "erlaubt": ["bohrer", "kiste", "band", "ofen", "montierer"], "ziel": {"zahnrad": 12}, "ticks": 3000, "needs": [{"type": "code", "pattern": "\\bfor\\b", "label": "Benutze eine for-Schleife"}], "start": "y = 2\n", "solution": "y = 2\nplatziere(\"bohrer\", 1, y, \"rechts\")\nfor x in range(2, 5):\n    platziere(\"band\", x, y, \"rechts\")\nplatziere(\"ofen\", 5, y, \"rechts\")\nfor x in range(6, 8):\n    platziere(\"band\", x, y, \"rechts\")\nplatziere(\"montierer\", 8, y, \"rechts\")\nfor x in range(9, 12):\n    platziere(\"band\", x, y, \"rechts\")\nplatziere(\"kiste\", 12, y)\n", "par_ticks": 658, "par_lines": 11}, {"title": "Die große Fabrik", "lesson": "Jetzt alles zusammen: Funktion, Schleife und Zahlen. Mit einer Linie würde das ewig dauern, also <b>skaliere<\/b> deine Fabrik. Tipp: Funktionen dürfen auch von einer Schleife aufgerufen werden, und <code>range(1, 6, 2)<\/code> zählt in Zweierschritten (1, 3, 5).", "task": "Drei Erzreihen (y = 1, 3, 5) sollen zusammen 45 Zahnräder schaffen. Baue pro Reihe die Kette aus Level 8 als Funktion und rufe sie in einer Schleife auf.", "tip": "def zahnrad_linie(y): ... und dann for y in range(1, 6, 2): zahnrad_linie(y)", "grid": ["..............", "ee............", "..............", "ee............", "..............", "ee............", ".............."], "erlaubt": ["bohrer", "kiste", "band", "ofen", "montierer"], "ziel": {"zahnrad": 45}, "ticks": 3000, "needs": [{"type": "code", "pattern": "\\bdef\\s+\\w+\\s*\\(", "label": "Definiere eine eigene Funktion mit def"}, {"type": "code", "pattern": "\\bfor\\b", "label": "Benutze eine for-Schleife"}], "start": "def zahnrad_linie(y):\n    \n\n", "solution": "def zahnrad_linie(y):\n    platziere(\"bohrer\", 1, y, \"rechts\")\n    for x in range(2, 5):\n        platziere(\"band\", x, y, \"rechts\")\n    platziere(\"ofen\", 5, y, \"rechts\")\n    for x in range(6, 8):\n        platziere(\"band\", x, y, \"rechts\")\n    platziere(\"montierer\", 8, y, \"rechts\")\n    for x in range(9, 12):\n        platziere(\"band\", x, y, \"rechts\")\n    platziere(\"kiste\", 12, y)\n\nfor y in range(1, 6, 2):\n    zahnrad_linie(y)\n", "par_ticks": 802, "par_lines": 13}]</script>
+<script type="text/x-python" id="runner">import io, re, json, sys, traceback, contextlib
+
+ITEMS = ["eisenerz", "kupfererz", "eisenplatte", "kupferplatte", "zahnrad"]
+CODE = {n: i + 1 for i, n in enumerate(ITEMS)}
+DIRS = {"rechts": (1, 0), "links": (-1, 0), "hoch": (0, -1), "runter": (0, 1)}
+MINE_T, BELT_T, SMELT_T, ASM_T = 20, 4, 24, 30
+SMELT = {"eisenerz": "eisenplatte", "kupfererz": "kupferplatte"}
+ORE_OF = {"e": "eisenerz", "k": "kupfererz"}
+ORE_NAME = {"e": "eisen", "k": "kupfer"}
+FRAME_EVERY = 2
+MAX_BUILDINGS = 300
+MAX_LINES = 200000
+STALL_T = 300
+
+
+class Fehler(Exception):
+    pass
+
+
+class B:
+    def __init__(self, typ, x, y, d):
+        self.typ, self.x, self.y, self.d = typ, x, y, d
+        self.item = None
+        self.cd = 0
+        self.prog = 0
+        self.q = []
+        self.plates = 0
+        self.ore = None
+
+
+def simulate(buildings, ticks, goal):
+    grid = {(b.x, b.y): b for b in buildings}
+    order = sorted(buildings, key=lambda b: (b.y, b.x))
+    totals = {}
+
+    def can_accept(dst, item):
+        t = dst.typ
+        if t == "band":
+            return dst.item is None
+        if t == "kiste":
+            return True
+        if t == "ofen":
+            return item in SMELT and len(dst.q) < 2
+        if t == "montierer":
+            return item == "eisenplatte" and dst.plates < 4
+        return False
+
+    def give(dst, item):
+        t = dst.typ
+        if t == "band":
+            dst.item, dst.cd = item, BELT_T
+        elif t == "kiste":
+            totals[item] = totals.get(item, 0) + 1
+            dst.cd += 1
+        elif t == "ofen":
+            dst.q.append(item)
+        elif t == "montierer":
+            dst.plates += 1
+
+    def snapshot(t):
+        s, p, w = [], [], []
+        for b in order:
+            s.append(CODE[b.item] if b.item else 0)
+            p.append(b.cd if b.typ in ("band", "kiste") else 0)
+            if b.typ == "bohrer":
+                w.append(1 if b.item is None else 0)
+            elif b.typ == "ofen":
+                w.append(1 if b.q and b.item is None else 0)
+            elif b.typ == "montierer":
+                w.append(1 if b.plates >= 2 and b.item is None else 0)
+            else:
+                w.append(0)
+        return {"t": t, "s": s, "p": p, "w": w, "c": dict(totals)}
+
+    frames = [snapshot(0)]
+    done = None
+    last = ticks
+    delivered = 0
+    last_delivery = 0
+    stalled = False
+    t = 0
+    while t < last:
+        t += 1
+        for b in order:
+            if b.typ == "band":
+                if b.item and b.cd > 0:
+                    b.cd -= 1
+            elif b.typ == "bohrer":
+                if b.item is None:
+                    b.prog += 1
+                    if b.prog >= MINE_T:
+                        b.item, b.prog = b.ore, 0
+            elif b.typ == "ofen":
+                if b.item is None and b.q:
+                    b.prog += 1
+                    if b.prog >= SMELT_T:
+                        b.item, b.prog = SMELT[b.q.pop(0)], 0
+            elif b.typ == "montierer":
+                if b.item is None and b.plates >= 2:
+                    b.prog += 1
+                    if b.prog >= ASM_T:
+                        b.item, b.prog = "zahnrad", 0
+                        b.plates -= 2
+        changed = True
+        while changed:
+            changed = False
+            for b in order:
+                if b.typ == "kiste" or b.item is None:
+                    continue
+                if b.typ == "band" and b.cd > 0:
+                    continue
+                dx, dy = DIRS[b.d]
+                dst = grid.get((b.x + dx, b.y + dy))
+                if dst is not None and can_accept(dst, b.item):
+                    give(dst, b.item)
+                    b.item = None
+                    changed = True
+        if done is None and goal and all(totals.get(k, 0) >= v for k, v in goal.items()):
+            done = t
+            last = min(ticks, t + 30)
+        now_delivered = sum(totals.values())
+        if now_delivered != delivered:
+            delivered, last_delivery = now_delivered, t
+        stalled = done is None and t - last_delivery > STALL_T
+        if t % FRAME_EVERY == 0 or t == last or stalled:
+            frames.append(snapshot(t))
+        if stalled:
+            break
+    return order, frames, done, stalled
+
+
+def run(code, level_json):
+    level = json.loads(level_json)
+    rows = level["grid"]
+    H, W = len(rows), len(rows[0])
+    allowed = level["erlaubt"]
+    bld = {}
+
+    def ok_int(v):
+        return isinstance(v, int) and not isinstance(v, bool)
+
+    def platziere(typ, x, y, richtung="rechts"):
+        if typ not in allowed:
+            raise Fehler('Das Gebäude "%s" gibt es nicht oder es ist noch nicht freigeschaltet. Verfügbar: %s'
+                         % (typ, ", ".join(allowed)))
+        if not (ok_int(x) and ok_int(y)):
+            raise Fehler("x und y müssen ganze Zahlen sein, z.B. platziere(\"%s\", 3, 2)" % typ)
+        if not (0 <= x < W and 0 <= y < H):
+            raise Fehler("Position (%d, %d) liegt außerhalb der Karte (x: 0 bis %d, y: 0 bis %d)" % (x, y, W - 1, H - 1))
+        if richtung not in DIRS:
+            raise Fehler('Richtung muss "rechts", "links", "hoch" oder "runter" sein, nicht %r' % (richtung,))
+        terr = rows[y][x]
+        if terr == "#":
+            raise Fehler("Auf Felsen (%d, %d) kann man nicht bauen" % (x, y))
+        if (x, y) in bld:
+            raise Fehler("Auf (%d, %d) steht schon ein %s" % (x, y, bld[(x, y)].typ))
+        if typ == "bohrer" and terr not in ORE_OF:
+            raise Fehler("Ein Bohrer braucht ein Erzfeld, auf (%d, %d) ist kein Erz" % (x, y))
+        if len(bld) >= MAX_BUILDINGS:
+            raise Fehler("Zu viele Gebäude (max. %d)" % MAX_BUILDINGS)
+        b = B(typ, x, y, richtung)
+        if typ == "bohrer":
+            b.ore = ORE_OF[terr]
+        bld[(x, y)] = b
+
+    def erz_bei(x, y):
+        if ok_int(x) and ok_int(y) and 0 <= x < W and 0 <= y < H:
+            return ORE_NAME.get(rows[y][x])
+        return None
+
+    def finde_erz(art):
+        if art not in ("eisen", "kupfer"):
+            raise Fehler('finde_erz kennt nur "eisen" und "kupfer"')
+        return [(x, y) for y in range(H) for x in range(W) if ORE_NAME.get(rows[y][x]) == art]
+
+    env = {"__name__": "__fabrik__", "platziere": platziere, "erz_bei": erz_bei,
+           "finde_erz": finde_erz, "BREITE": W, "HOEHE": H}
+
+    count = [0]
+
+    def tracer(frame, event, arg):
+        if frame.f_code.co_filename != "<fabrik>":
+            return None
+
+        def local(frame, event, arg):
+            if event == "line":
+                count[0] += 1
+                if count[0] > MAX_LINES:
+                    raise Fehler("Dein Code läuft viel zu lange - steckt eine Endlosschleife drin?")
+            return local
+        return local
+
+    out = io.StringIO()
+    error = None
+    try:
+        compiled = compile(code, "<fabrik>", "exec")
+    except SyntaxError as e:
+        compiled = None
+        error = {"kind": "syntax", "line": e.lineno, "msg": "%s: %s" % (type(e).__name__, e.msg)}
+
+    if compiled is not None:
+        sys.settrace(tracer)
+        try:
+            with contextlib.redirect_stdout(out):
+                exec(compiled, env)
+        except BaseException as e:
+            line = None
+            for fr in traceback.extract_tb(e.__traceback__):
+                if fr.filename == "<fabrik>":
+                    line = fr.lineno
+            msg = str(e) if isinstance(e, Fehler) else "%s: %s" % (type(e).__name__, e)
+            hints = {"NameError": "Ein Name ist unbekannt - Tippfehler, oder die Variable ist noch nicht definiert?",
+                     "TypeError": "Ein Befehl hat falsche oder fehlende Argumente bekommen.",
+                     "ValueError": "Ein Wert passt nicht."}
+            if type(e).__name__ in hints:
+                msg += "\n" + hints[type(e).__name__]
+            error = {"kind": "runtime", "line": line, "msg": msg}
+        finally:
+            sys.settrace(None)
+
+    if error and error["kind"] == "syntax":
+        return json.dumps({"error": error, "output": "", "won": False})
+
+    blist = sorted(bld.values(), key=lambda b: (b.y, b.x))
+    order, frames, done, stalled = simulate(blist, level["ticks"], level["ziel"])
+
+    plain = re.sub(r"#.*", "", code)
+    output = out.getvalue()[:2000]
+    checks = []
+    for n in level.get("needs", []):
+        target = plain if n["type"] == "code" else output
+        checks.append({"label": n["label"], "ok": bool(re.search(n["pattern"], target, re.M))})
+    won = done is not None and error is None and all(c["ok"] for c in checks)
+    return json.dumps({
+        "error": error, "output": output, "checks": checks, "won": won, "done": done, "stalled": stalled,
+        "buildings": [[b.typ, b.x, b.y, b.d, CODE[b.ore] if b.ore else 0] for b in order],
+        "frames": frames, "ticks": level["ticks"],
+    })
+</script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/python/python.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/edit/matchbrackets.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/edit/closebrackets.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/selection/active-line.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/comment/comment.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/show-hint.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/runmode/runmode.js"></script>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+<script>
+const LEVELS = JSON.parse(document.getElementById('levels-data').textContent);
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const NAMES = {eisenerz:'Eisenerz', kupfererz:'Kupfererz', eisenplatte:'Eisenplatte', kupferplatte:'Kupferplatte', zahnrad:'Zahnrad'};
+const ICOL = [null,'#8d9bb0','#c97f4b','#d6e8fa','#ff9d5c','#f5d547'];
+const ITEM_KEYS = [null,'eisenerz','kupfererz','eisenplatte','kupferplatte','zahnrad'];
+
+let cur = 0, runFn = null, res = null, playing = false, t0 = 0, speed = 1, fiNow = 0, handled = true, timer = null, loadingCode = false;
+
+/* ---------- Spielstand ---------- */
+let stars = JSON.parse(localStorage.getItem('fq_stars') || 'null');
+if (!stars) { stars = {}; JSON.parse(localStorage.getItem('fq_solved') || '[]').forEach(i => stars[i] = 1); }
+const saveStars = () => localStorage.setItem('fq_stars', JSON.stringify(stars));
+const isSolved = i => (stars[i] || 0) > 0;
+
+function buildTrack() {
+  const el = $('track'); el.innerHTML = '';
+  LEVELS.forEach((lv, i) => {
+    if (i) { const l = document.createElement('div'); l.className = 'link' + (isSolved(i - 1) ? ' done' : ''); el.appendChild(l); }
+    const b = document.createElement('button');
+    b.className = 'node' + (i === cur ? ' cur' : '') + (isSolved(i) ? ' done' : '');
+    b.title = lv.title;
+    b.disabled = !(i === 0 || isSolved(i - 1) || isSolved(i));
+    b.innerHTML = (i + 1) + (isSolved(i) ? `<small>${'★'.repeat(stars[i])}</small>` : '');
+    b.onclick = () => loadLevel(i);
+    el.appendChild(b);
+  });
+  $('score').textContent = '★ ' + Object.values(stars).reduce((a, b) => a + b, 0) + ' / ' + LEVELS.length * 3;
+}
+
+/* ---------- Editor ---------- */
+const API = ['platziere','finde_erz','erz_bei','print','range','len','BREITE','HOEHE'];
+const KEYWORDS = ['for','in','if','else','elif','while','def','return','not','and','or','True','False','None'];
+const DIR_WORDS = ['rechts','links','hoch','runter'];
+const SIGS = {
+  platziere:'platziere(typ, x, y, richtung="rechts") → stellt ein Gebäude auf',
+  finde_erz:'finde_erz(art) → Liste aller (x, y) mit "eisen" oder "kupfer"',
+  erz_bei:'erz_bei(x, y) → "eisen", "kupfer" oder None',
+  range:'range(start, ende, schritt=1) → Zahlen von start bis ende-1',
+  print:'print(wert, ...) → schreibt ins Terminal',
+};
+
+CodeMirror.defineMode('fabrik', (config) => {
+  const base = CodeMirror.getMode(config, 'python');
+  return {
+    startState: () => CodeMirror.startState(base),
+    copyState: s => CodeMirror.copyState(base, s),
+    token(stream, state) {
+      const st = base.token(stream, state);
+      if (st === 'variable' && API.slice(0, 3).concat(['BREITE','HOEHE']).includes(stream.current())) return 'api';
+      return st;
+    },
+    indent: (s, a, l) => base.indent(s, a, l),
+    electricInput: base.electricInput,
+    lineComment: '#',
+    closeBrackets: { triples: '' },
+  };
+});
+
+function hinter(ed) {
+  const c = ed.getCursor(), before = ed.getLine(c.line).slice(0, c.ch), m = before.match(/\w*$/), word = m[0];
+  const from = CodeMirror.Pos(c.line, c.ch - word.length), to = c;
+  let pool;
+  if (/platziere\(\s*["']\w*$/.test(before)) pool = LEVELS[cur].erlaubt;
+  else if (/platziere\(.*["']\w*$/.test(before)) pool = DIR_WORDS;
+  else if (/finde_erz\(\s*["']\w*$/.test(before)) pool = ['eisen','kupfer'];
+  else if (/["'][^"']*$/.test(before) || /#/.test(before)) return null;
+  else pool = API.concat(KEYWORDS);
+  const list = pool.filter(w => w.startsWith(word) && w !== word);
+  return list.length ? { list, from, to } : null;
+}
+
+const cm = CodeMirror($('editor'), {
+  mode: 'fabrik', theme: 'fabrik', lineNumbers: true, indentUnit: 4, tabSize: 4, indentWithTabs: false,
+  matchBrackets: true, autoCloseBrackets: true, styleActiveLine: true, gutters: ['err', 'CodeMirror-linenumbers'],
+  extraKeys: {
+    Tab: e => e.somethingSelected() ? e.indentSelection('add') : e.replaceSelection('    ', 'end'),
+    'Shift-Tab': e => e.indentSelection('subtract'),
+    'Cmd-/': e => e.toggleComment(), 'Ctrl-/': e => e.toggleComment(),
+    'Ctrl-Space': e => e.showHint({ hint: hinter, completeSingle: false }),
+  },
+});
+cm.on('change', () => {
+  if (loadingCode) return;
+  localStorage.setItem('fq_code_' + cur, cm.getValue());
+  $('dirty').style.background = 'var(--amber)';
+  setRunState('● Tippt …', '');
+  schedule();
+});
+cm.on('inputRead', (ed, ch) => {
+  if (ch.origin === '+input' && /[\w"']/.test(ch.text[0]) && !ed.state.completionActive) {
+    const before = ed.getLine(ed.getCursor().line).slice(0, ed.getCursor().ch);
+    if (/\w\w$/.test(before) || /["']$/.test(before)) ed.showHint({ hint: hinter, completeSingle: false });
+  }
+});
+cm.on('cursorActivity', () => {
+  const c = cm.getCursor(), before = cm.getLine(c.line).slice(0, c.ch);
+  $('pos').textContent = `Zeile ${c.line + 1}, Spalte ${c.ch + 1}`;
+  let depth = 0, name = '';
+  for (let i = before.length - 1; i >= 0; i--) {
+    if (before[i] === ')') depth++;
+    else if (before[i] === '(') { if (depth === 0) { const m = before.slice(0, i).match(/(\w+)$/); if (m && SIGS[m[1]]) { name = m[1]; break; } } else depth--; }
+  }
+  $('sig').textContent = name ? SIGS[name] : '';
+});
+
+let markedLine = null;
+function clearMark() { if (markedLine !== null) { cm.removeLineClass(markedLine, 'background'); markedLine = null; } cm.clearGutter('err'); }
+function mark(line, cls, sym, color) {
+  clearMark();
+  if (!line) return;
+  const n = Math.min(line - 1, cm.lastLine());
+  markedLine = cm.addLineClass(n, 'background', cls);
+  const m = document.createElement('span'); m.className = 'gmark'; m.textContent = sym; m.style.color = color;
+  cm.setGutterMarker(n, 'err', m);
+}
+function setRunState(text, cls) { $('runState').textContent = text; $('statusbar').className = cls; }
+
+/* ---------- Level ---------- */
+function loadLevel(i) {
+  cur = i; const lv = LEVELS[i];
+  $('ltitle').textContent = `Level ${i + 1}: ${lv.title}`;
+  $('task').innerHTML = '<b>Auftrag:</b> ' + lv.task;
+  $('lesson').innerHTML = lv.lesson;
+  document.querySelectorAll('#lesson pre').forEach(p => { const t = p.textContent; p.classList.add('cm-s-fabrik'); p.textContent = ''; CodeMirror.runMode(t, 'fabrik', p); });
+  $('tip').style.display = 'none'; $('tip').textContent = '💡 ' + lv.tip;
+  $('starInfo').innerHTML = `Sterne: ★ Ziel erreicht &nbsp; ★ Bonus: Ziel bis Tick ${parTicks(lv)} &nbsp; ★ Bonus: höchstens ${lv.par_lines} Zeilen Code`;
+  $('breadcrumb').textContent = `fabrik  ›  level_${i + 1}  ›  fabrik.py`;
+  loadingCode = true; cm.setValue(localStorage.getItem('fq_code_' + i) ?? lv.start); cm.clearHistory(); loadingCode = false;
+  cm.setCursor(cm.lastLine(), 0);
+  clearMark();
+  res = null; playing = false; handled = true; particles.length = 0; prevCounts = null;
+  $('checks').innerHTML = ''; terminal('<span class="ghost">Bereit.</span>');
+  showToast(''); $('probBadge').style.display = 'none';
+  lastGoalKey = ''; renderHud(null);
+  geo = null;
+  buildTrack(); updateNext(); schedule(50);
+}
+function parTicks(lv) { return Math.ceil(lv.par_ticks * 1.1); }
+function updateNext() { $('nextInline').style.display = isSolved(cur) && cur < LEVELS.length - 1 ? 'block' : 'none'; }
+function terminal(html) { $('terminal').innerHTML = '<span class="pr">➜</span> <span class="cmd">python fabrik.py</span>\n' + html; }
+
+/* ---------- Ausführen ---------- */
+function schedule(ms = 500) { clearTimeout(timer); timer = setTimeout(execute, ms); }
+function execute() {
+  if (!runFn) return;
+  const code = cm.getValue();
+  let r;
+  try { r = JSON.parse(runFn(code, JSON.stringify(LEVELS[cur]))); }
+  catch (e) { terminal('<span class="err">Interner Fehler: ' + esc(e) + '</span>'); return; }
+  $('dirty').style.background = 'var(--mut)';
+  if (r.error && r.error.kind === 'syntax') {
+    terminal(`<span class="soft">✎ Noch nicht lauffähig (Zeile ${r.error.line}): ${esc(r.error.msg)}</span>`);
+    mark(r.error.line, 'softLine', '●', 'var(--warn)');
+    setRunState('● Syntax prüfen', '');
+    return;                                  // die alte Fabrik läuft sichtbar weiter
+  }
+  res = r;
+  let html = r.output ? esc(r.output) : '';
+  if (r.error) {
+    html += (html ? '\n' : '') + `<span class="err">✖ Fehler in Zeile ${r.error.line ?? '?'}\n${esc(r.error.msg)}</span>`;
+    mark(r.error.line, 'errLine', '✖', 'var(--bad)');
+    setRunState('✖ 1 Fehler', 'err');
+  } else {
+    clearMark();
+    if (!html) html = '<span class="ghost">(keine Ausgabe, mit print(...) kannst du Werte anzeigen)</span>';
+    setRunState('✓ Läuft', 'ok');
+  }
+  $('probBadge').style.display = r.error ? 'inline' : 'none';
+  terminal(html);
+  $('checks').innerHTML = (r.checks || []).map(c => `<span class="chk ${c.ok ? 'ok' : ''}">${c.ok ? '✓' : '○'} ${esc(c.label)}</span>`).join('');
+  if (!r.buildings.length) {
+    r.frames = r.frames.slice(0, 1); playing = false; handled = true; prevCounts = null; lastGoalKey = '';
+    showToast(r.error ? '' : 'Noch keine Gebäude: schreib deinen ersten Befehl', 'info');
+    return;
+  }
+  replay();
+}
+function replay() {
+  if (!res || !res.buildings || !res.buildings.length) return;
+  t0 = performance.now(); fiNow = 0; playing = true; handled = false; prevCounts = null; particles.length = 0;
+  showToast('');
+}
+function showToast(text, cls) { const t = $('toast'); t.textContent = text; t.className = cls || ''; t.style.display = text ? 'block' : 'none'; }
+
+function countStars(lv) {
+  const lines = cm.getValue().split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).length;
+  return { fast: res.done <= parTicks(lv), short: lines <= lv.par_lines, lines };
+}
+function finish() {
+  const lv = LEVELS[cur];
+  if (res.won) {
+    const s = countStars(lv), n = 1 + s.fast + s.short, before = stars[cur] || 0;
+    if (n > before) {
+      stars[cur] = n; saveStars(); buildTrack(); updateNext();
+      showWin(lv, s, n);
+    } else showToast(`✓ Ziel erreicht nach ${res.done} Ticks (${'★'.repeat(n)})`, 'good');
+    return;
+  }
+  const c = res.frames[res.frames.length - 1].c;
+  if (res.error) showToast(`Die Fabrik läuft nur bis zum Fehler in Zeile ${res.error.line ?? '?'}`, 'bad');
+  else if (res.done !== null && res.done !== undefined) {
+    const miss = (res.checks || []).find(x => !x.ok);
+    showToast('Ziel erreicht, aber es fehlt noch: ' + (miss ? miss.label : ''), 'info');
+  } else {
+    const parts = Object.entries(lv.ziel).filter(([k, v]) => (c[k] || 0) < v).map(([k, v]) => `${c[k] || 0}/${v} ${NAMES[k]}`);
+    showToast(res.stalled
+      ? 'Gerade kommt nichts mehr in der Kiste an. Wo bleibt die Ware hängen?'
+      : 'Noch nicht am Ziel: ' + parts.join(', ') + '. Schau dir an, was in der Kiste landet.', 'info');
+  }
+}
+function showWin(lv, s, n) {
+  const st = $('stars').children;
+  for (let i = 0; i < 3; i++) { st[i].className = ''; void st[i].offsetWidth; if (i < n) st[i].className = 'on'; }
+  $('starRows').innerHTML =
+    `<div class="on">★ Ziel erreicht</div>` +
+    `<div class="${s.fast ? 'on' : ''}">${s.fast ? '★' : '☆'} Bonus schnell: Tick ${res.done} (bis ${parTicks(lv)})</div>` +
+    `<div class="${s.short ? 'on' : ''}">${s.short ? '★' : '☆'} Bonus kompakt: ${s.lines} Zeilen (bis ${lv.par_lines})</div>`;
+  const last = cur === LEVELS.length - 1;
+  $('nextBtn').textContent = last ? 'Fabrik vollendet!' : 'Nächstes Level →';
+  $('nextBtn').onclick = () => { $('winScreen').classList.remove('show'); if (!last) loadLevel(cur + 1); };
+  $('winScreen').classList.add('show');
+  burst(); sfxWin();
+}
+$('stayBtn').onclick = () => { $('winScreen').classList.remove('show'); cm.focus(); };
+
+/* ---------- HUD ---------- */
+let lastGoalKey = '';
+function renderHud(frame) {
+  const lv = LEVELS[cur], c = frame ? frame.c : {}, t = frame ? frame.t : 0;
+  const key = cur + JSON.stringify(c);
+  if (key !== lastGoalKey) {
+    lastGoalKey = key;
+    $('goals').innerHTML = '<div class="plabel">Produktionsziel</div>' + Object.entries(lv.ziel).map(([k, need]) => {
+      const got = c[k] || 0, code = ITEM_KEYS.indexOf(k), ok = got >= need;
+      return `<div class="goal ${ok ? 'ok' : ''}"><i class="swatch" style="background:${ICOL[code]}"></i>${NAMES[k]}<span class="num">${got} / ${need}</span></div><div class="meter"><i style="width:${Math.min(100, got / need * 100)}%"></i></div>`;
+    }).join('');
+  }
+  $('clockNum').textContent = t + ' Ticks';
+}
+
+/* ---------- Grafik ---------- */
+const cv = $('cv'), g = cv.getContext('2d');
+if (!CanvasRenderingContext2D.prototype.roundRect) CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h) { this.rect(x, y, w, h); };
+const ANG = { rechts:0, runter:Math.PI/2, links:Math.PI, hoch:-Math.PI/2 };
+const DV = { rechts:[1,0], links:[-1,0], hoch:[0,-1], runter:[0,1] };
+let geo = null, terrain = null, clock = 0, lastNow = 0, prevCounts = null, hoverTile = null;
+const particles = [];
+const rnd = (x, y, n) => { let h = (x * 374761393 + y * 668265263 + n * 1274126177) >>> 0; h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+const rrect = (c, x, y, w, h, r) => { c.beginPath(); c.roundRect(x, y, w, h, r); };
+
+function layout() {
+  const lv = LEVELS[cur], W = lv.grid[0].length, H = lv.grid.length, wr = $('world');
+  const c = Math.max(22, Math.min(84, Math.floor(Math.min((wr.clientWidth - 24) / W, (wr.clientHeight - 108) / H))));
+  const dpr = window.devicePixelRatio || 1;
+  cv.style.width = c * W + 'px'; cv.style.height = c * H + 'px';
+  cv.width = c * W * dpr; cv.height = c * H * dpr;
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  geo = { c, W, H, dpr, lvl: cur };
+  terrain = paintTerrain(lv, c, W, H, dpr);
+}
+new ResizeObserver(() => { geo = null; }).observe($('world'));
+
+function paintTerrain(lv, c, W, H, dpr) {
+  const o = document.createElement('canvas'); o.width = c * W * dpr; o.height = c * H * dpr;
+  const t = o.getContext('2d'); t.scale(dpr, dpr);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const px = x * c, py = y * c, n = rnd(x, y, 1);
+    t.fillStyle = `hsl(${88 + n * 16},${20 + n * 6}%,${18 + n * 4}%)`; t.fillRect(px, py, c, c);
+    for (let k = 0; k < 9; k++) {                         // Grasbüschel und Erdflecken
+      const a = rnd(x, y, k + 10), b = rnd(x, y, k + 30), d = rnd(x, y, k + 50);
+      t.fillStyle = d > .7 ? 'rgba(0,0,0,.14)' : 'rgba(170,200,110,.12)';
+      t.fillRect(px + a * c, py + b * c, c * .05, c * (.04 + d * .08));
+    }
+  }
+  t.strokeStyle = 'rgba(0,0,0,.13)'; t.lineWidth = 1;
+  for (let x = 0; x <= W; x++) { t.beginPath(); t.moveTo(x * c + .5, 0); t.lineTo(x * c + .5, H * c); t.stroke(); }
+  for (let y = 0; y <= H; y++) { t.beginPath(); t.moveTo(0, y * c + .5); t.lineTo(W * c, y * c + .5); t.stroke(); }
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const ch = lv.grid[y][x], px = x * c, py = y * c;
+    if (ch === 'e' || ch === 'k') {
+      const dark = ch === 'e' ? '#2c3a4e' : '#4e3322', mid = ch === 'e' ? '#62799b' : '#b0693a', hi = ch === 'e' ? '#b7cdec' : '#f0a56c';
+      t.fillStyle = dark; rrect(t, px + c*.05, py + c*.05, c*.9, c*.9, c*.2); t.fill();
+      for (let k = 0; k < 8; k++) {
+        const a = px + c * (.18 + .64 * rnd(x, y, k + 70)), b = py + c * (.18 + .64 * rnd(x, y, k + 90)), r = c * (.07 + .07 * rnd(x, y, k + 110));
+        t.fillStyle = 'rgba(0,0,0,.35)'; t.beginPath(); t.arc(a + 1, b + 2, r, 0, 7); t.fill();
+        t.fillStyle = mid; t.beginPath(); t.arc(a, b, r, 0, 7); t.fill();
+        t.fillStyle = hi; t.beginPath(); t.arc(a - r*.3, b - r*.3, r*.35, 0, 7); t.fill();
+      }
+    }
+    if (ch === '#') {
+      t.fillStyle = 'rgba(0,0,0,.4)'; t.beginPath(); t.ellipse(px + c/2, py + c*.72, c*.42, c*.2, 0, 0, 7); t.fill();
+      t.fillStyle = '#62666d'; t.beginPath();
+      t.moveTo(px + c*.1, py + c*.74); t.lineTo(px + c*.22, py + c*.3); t.lineTo(px + c*.48, py + c*.12); t.lineTo(px + c*.8, py + c*.34); t.lineTo(px + c*.9, py + c*.74); t.closePath(); t.fill();
+      t.fillStyle = '#868b92'; t.beginPath();
+      t.moveTo(px + c*.22, py + c*.3); t.lineTo(px + c*.48, py + c*.12); t.lineTo(px + c*.55, py + c*.42); t.lineTo(px + c*.3, py + c*.5); t.closePath(); t.fill();
+    }
+  }
+  t.fillStyle = 'rgba(255,255,255,.34)'; t.font = `600 ${Math.max(9, c * .17)}px "JetBrains Mono",monospace`; t.textBaseline = 'top';
+  for (let x = 0; x < W; x++) t.fillText(x, x * c + 3, 2);
+  for (let y = 1; y < H; y++) t.fillText(y, 3, y * c + 2);
+  const v = t.createRadialGradient(W*c/2, H*c/2, Math.min(W,H)*c*.35, W*c/2, H*c/2, Math.max(W,H)*c*.72);
+  v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,.42)');
+  t.fillStyle = v; t.fillRect(0, 0, W*c, H*c);
+  return o;
+}
+
+function machineBody(c, top, bottom) {
+  g.fillStyle = 'rgba(0,0,0,.4)'; rrect(g, -c*.42, -c*.36, c*.88, c*.86, c*.12); g.fill();
+  const gr = g.createLinearGradient(0, -c*.44, 0, c*.44); gr.addColorStop(0, top); gr.addColorStop(1, bottom);
+  g.fillStyle = gr; rrect(g, -c*.44, -c*.44, c*.88, c*.86, c*.1); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,.65)'; g.lineWidth = 1.5; g.stroke();
+  g.strokeStyle = 'rgba(255,255,255,.18)'; g.lineWidth = 1; rrect(g, -c*.4, -c*.4, c*.8, c*.78, c*.07); g.stroke();
+  g.fillStyle = 'rgba(0,0,0,.5)';
+  [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(([a, b]) => { g.beginPath(); g.arc(a*c*.34, b*c*.33, c*.025, 0, 7); g.fill(); });
+}
+function outArrow(c, d, color) {
+  g.save(); g.rotate(ANG[d] ?? 0); g.fillStyle = color; g.strokeStyle = 'rgba(0,0,0,.7)'; g.lineWidth = 1;
+  g.beginPath(); g.moveTo(c*.47, 0); g.lineTo(c*.29, -c*.12); g.lineTo(c*.29, c*.12); g.closePath(); g.fill(); g.stroke(); g.restore();
+}
+function drawBelt(b, c) {
+  const [, , , d] = b;
+  g.save(); g.rotate(ANG[d] ?? 0);
+  g.fillStyle = '#23262b'; g.fillRect(-c/2, -c*.4, c, c*.8);
+  g.fillStyle = '#6d7480'; g.fillRect(-c/2, -c*.42, c, c*.07); g.fillRect(-c/2, c*.35, c, c*.07);
+  g.save(); g.beginPath(); g.rect(-c/2, -c*.35, c, c*.7); g.clip();
+  const ph = (clock * 3) % 1;
+  g.strokeStyle = '#ffb74d55'; g.lineWidth = Math.max(1.5, c * .05);
+  for (let k = -1; k < 3; k++) {
+    const cx = -c/2 + (k + ph) * c/2;
+    g.beginPath(); g.moveTo(cx - c*.06, -c*.2); g.lineTo(cx + c*.08, 0); g.lineTo(cx - c*.06, c*.2); g.stroke();
+  }
+  g.restore(); g.restore();
+}
+function drawBuilding(b, frame, i, c) {
+  const [typ, x, y, d, ore] = b, working = frame && frame.w[i];
+  g.save(); g.translate(x*c + c/2, y*c + c/2);
+  if (typ === 'band') drawBelt(b, c);
+  else if (typ === 'bohrer') {
+    machineBody(c, '#d4a02e', '#8a6416');
+    g.fillStyle = 'rgba(0,0,0,.28)'; for (let k = -2; k <= 2; k++) { g.save(); g.translate(k*c*.15, -c*.34); g.rotate(.6); g.fillRect(-c*.025, -c*.08, c*.05, c*.16); g.restore(); }
+    g.fillStyle = '#20242a'; g.beginPath(); g.arc(0, 0, c*.23, 0, 7); g.fill();
+    g.save(); g.rotate(working ? clock * 16 : 0); g.fillStyle = ore === 1 ? '#b7cdec' : '#f0a56c';
+    for (let k = 0; k < 3; k++) { g.rotate(Math.PI*2/3); g.beginPath(); g.moveTo(0, 0); g.lineTo(c*.2, -c*.07); g.lineTo(c*.2, c*.07); g.closePath(); g.fill(); }
+    g.fillStyle = '#20242a'; g.beginPath(); g.arc(0, 0, c*.05, 0, 7); g.fill(); g.restore();
+    outArrow(c, d, '#ffe08a');
+    if (working && Math.random() < .12 * speed) spawn(x*c + c/2, y*c + c/2, { color: ore === 1 ? '#b7cdec' : '#f0a56c', vy: -30, spread: 40, life: .4, size: c*.04 });
+  } else if (typ === 'ofen') {
+    machineBody(c, '#6e6f75', '#37383d');
+    g.fillStyle = '#17181b'; rrect(g, -c*.26, -c*.08, c*.52, c*.34, c*.05); g.fill();
+    if (working) {
+      const fl = .75 + .25 * Math.sin(clock * 30);
+      const gr = g.createRadialGradient(0, c*.16, 1, 0, c*.14, c*.32); gr.addColorStop(0, '#fff0a8'); gr.addColorStop(.45, '#ff8a1f'); gr.addColorStop(1, 'rgba(180,40,0,0)');
+      g.globalAlpha = fl; g.fillStyle = gr; rrect(g, -c*.26, -c*.08, c*.52, c*.34, c*.05); g.fill(); g.globalAlpha = 1;
+      if (Math.random() < .14 * speed) spawn(x*c + c*.5, y*c + c*.12, { color: 'rgba(190,190,190,.6)', vy: -26, spread: 10, life: 1.1, size: c*.09, grow: true });
+    }
+    g.fillStyle = '#4a4b51'; g.fillRect(-c*.12, -c*.44, c*.24, c*.14);
+    outArrow(c, d, '#e6e0d4');
+  } else if (typ === 'montierer') {
+    machineBody(c, '#5a7fb0', '#2c4266');
+    g.save(); g.rotate(working ? clock * 5 : 0); drawGear(0, 0, c*.23, '#dbe7f7', '#2c4266'); g.restore();
+    g.fillStyle = working ? '#7dff7a' : '#46513f'; g.beginPath(); g.arc(c*.3, -c*.32, c*.04, 0, 7); g.fill();
+    outArrow(c, d, '#dbe7f7');
+  } else if (typ === 'kiste') {
+    g.fillStyle = 'rgba(0,0,0,.4)'; rrect(g, -c*.4, -c*.3, c*.84, c*.8, c*.06); g.fill();
+    g.fillStyle = '#9c6a32'; rrect(g, -c*.42, -c*.38, c*.84, c*.78, c*.06); g.fill();
+    g.fillStyle = '#bc8446'; rrect(g, -c*.42, -c*.38, c*.84, c*.24, c*.06); g.fill();
+    g.strokeStyle = '#573712'; g.lineWidth = Math.max(1, c*.03);
+    rrect(g, -c*.42, -c*.38, c*.84, c*.78, c*.06); g.stroke();
+    [-.2, .1, .28].forEach(a => { g.beginPath(); g.moveTo(-c*.42, a*c); g.lineTo(c*.42, a*c); g.stroke(); });
+    g.fillStyle = '#d9d3c0'; g.fillRect(-c*.07, -c*.2, c*.14, c*.1);
+    const n = frame ? frame.p[i] : 0;
+    if (n) {
+      g.font = `700 ${Math.max(11, c*.26)}px "Chakra Petch",sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.lineWidth = 3; g.strokeStyle = '#000'; g.strokeText(n, 0, c*.15); g.fillStyle = '#fff'; g.fillText(n, 0, c*.15); g.textAlign = 'left';
+    }
+  }
+  g.restore();
+}
+function drawGear(x, y, r, col, hole) {
+  g.save(); g.translate(x, y); g.fillStyle = col;
+  for (let k = 0; k < 8; k++) { g.rotate(Math.PI/4); g.fillRect(-r*.2, -r*1.2, r*.4, r*.45); }
+  g.beginPath(); g.arc(0, 0, r*.85, 0, 7); g.fill();
+  g.fillStyle = hole; g.beginPath(); g.arc(0, 0, r*.35, 0, 7); g.fill(); g.restore();
+}
+function drawItem(b, frame, i, c) {
+  const code = frame.s[i]; if (!code) return;
+  const [typ, x, y, d] = b, [dx, dy] = DV[d] || [1, 0];
+  const off = typ === 'band' ? (4 - frame.p[i]) / 4 - .5 : .32;
+  const cx = x*c + c/2 + dx*off*c, cy = y*c + c/2 + dy*off*c, r = c*.14, col = ICOL[code];
+  g.fillStyle = 'rgba(0,0,0,.4)'; g.beginPath(); g.ellipse(cx, cy + r*.8, r, r*.45, 0, 0, 7); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,.75)'; g.lineWidth = 1;
+  if (code <= 2) {                                       // Erz: unregelmäßiger Klumpen
+    g.fillStyle = col; g.beginPath();
+    g.moveTo(cx - r, cy); g.lineTo(cx - r*.5, cy - r*.85); g.lineTo(cx + r*.45, cy - r*.8); g.lineTo(cx + r, cy - r*.1); g.lineTo(cx + r*.5, cy + r*.75); g.lineTo(cx - r*.55, cy + r*.7); g.closePath(); g.fill(); g.stroke();
+    g.fillStyle = 'rgba(255,255,255,.4)'; g.beginPath(); g.arc(cx - r*.25, cy - r*.3, r*.22, 0, 7); g.fill();
+  } else if (code <= 4) {                                // Platte: Barren
+    g.fillStyle = col; g.beginPath();
+    g.moveTo(cx - r*.65, cy - r*.6); g.lineTo(cx + r*.65, cy - r*.6); g.lineTo(cx + r*1.05, cy + r*.55); g.lineTo(cx - r*1.05, cy + r*.55); g.closePath(); g.fill(); g.stroke();
+    g.fillStyle = 'rgba(255,255,255,.5)'; g.fillRect(cx - r*.5, cy - r*.45, r, r*.2);
+  } else drawGear(cx, cy, r*1.1, col, '#7a6512');
+}
+function spawn(x, y, o) {
+  if (particles.length > 220) return;
+  particles.push({ x, y, vx: (Math.random() - .5) * (o.spread || 0), vy: (o.vy || 0) + (Math.random() - .5) * (o.spread || 0), life: o.life || 1, max: o.life || 1, color: o.color, size: o.size || 3, grow: o.grow, text: o.text, grav: o.grav || 0 });
+}
+function burst() {
+  if (!geo) return;
+  const cols = ['#ffa726','#ffd166','#6fcf6a','#6db3ff','#ff6b5e'], w = geo.W*geo.c, h = geo.H*geo.c;
+  for (let i = 0; i < 150; i++) spawn(w * Math.random(), h * .55, { color: cols[i % 5], vy: -210, spread: 330, life: 1.6 + Math.random(), size: 2 + Math.random()*4, grav: 300 });
+}
+function drawParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.life -= dt; if (p.life <= 0) { particles.splice(i, 1); continue; }
+    p.vy += p.grav * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+    const a = Math.min(1, p.life / p.max * 1.4);
+    g.globalAlpha = a;
+    if (p.text) {
+      g.font = `700 ${p.size}px "Chakra Petch",sans-serif`; g.textAlign = 'center'; g.lineWidth = 3; g.strokeStyle = '#000';
+      g.strokeText(p.text, p.x, p.y); g.fillStyle = p.color; g.fillText(p.text, p.x, p.y); g.textAlign = 'left';
+    } else {
+      g.fillStyle = p.color; const s = p.grow ? p.size * (1.8 - p.life / p.max) : p.size;
+      g.beginPath(); g.arc(p.x, p.y, s, 0, 7); g.fill();
+    }
+  }
+  g.globalAlpha = 1;
+}
+
+function draw(now) {
+  requestAnimationFrame(draw);
+  const dt = Math.min(.05, (now - lastNow) / 1000); lastNow = now;
+  if (!geo || geo.lvl !== cur) layout();
+  const { c, W, H } = geo;
+  let frame = null;
+  if (res && res.frames) {
+    if (playing) {
+      fiNow = (now - t0) / 1000 * 30 * speed;
+      clock += dt * speed;
+      if (fiNow >= res.frames.length - 1) { fiNow = res.frames.length - 1; playing = false; }
+    } else fiNow = Math.min(fiNow, res.frames.length - 1);
+    frame = res.frames[Math.floor(fiNow)];
+  }
+  g.drawImage(terrain, 0, 0, W*c, H*c);
+  if (res && res.buildings) {
+    res.buildings.forEach((b, i) => { if (b[0] === 'band') drawBuilding(b, frame, i, c); });
+    res.buildings.forEach((b, i) => { if (b[0] !== 'band') drawBuilding(b, frame, i, c); });
+    if (frame) res.buildings.forEach((b, i) => drawItem(b, frame, i, c));
+    if (frame) {
+      if (prevCounts) res.buildings.forEach((b, i) => {
+        if (b[0] === 'kiste' && frame.p[i] > (prevCounts[i] || 0)) {
+          spawn(b[1]*c + c/2, b[2]*c + c*.1, { text: '+' + (frame.p[i] - prevCounts[i]), color: '#ffe08a', vy: -38, life: .8, size: Math.max(12, c*.28) });
+          sfxTick();
+        }
+      });
+      prevCounts = frame.p;
+    }
+  }
+  if (hoverTile) {
+    g.strokeStyle = '#ffa726'; g.lineWidth = 2; g.strokeRect(hoverTile.x*c + 1, hoverTile.y*c + 1, c - 2, c - 2);
+  }
+  drawParticles(dt);
+  renderHud(frame);
+  if (res && frame && !handled) {
+    if ((res.won && frame.t >= res.done) || !playing) { handled = true; finish(); }
+  }
+}
+
+/* ---------- Mauszeiger über der Karte ---------- */
+cv.addEventListener('mousemove', e => {
+  if (!geo) return;
+  const r = cv.getBoundingClientRect(), x = Math.floor((e.clientX - r.left) / geo.c), y = Math.floor((e.clientY - r.top) / geo.c);
+  if (x < 0 || y < 0 || x >= geo.W || y >= geo.H) return;
+  hoverTile = { x, y };
+  const ch = LEVELS[cur].grid[y][x], b = res && res.buildings && res.buildings.find(q => q[1] === x && q[2] === y);
+  const terr = { e:'Eisenerz', k:'Kupfererz', '#':'Felsen', '.':'Boden' }[ch];
+  $('hover').textContent = `x=${x}, y=${y}  ·  ${b ? b[0] + ' (' + b[3] + ')' : terr}`;
+  $('hover').style.display = 'block';
+});
+cv.addEventListener('mouseleave', () => { hoverTile = null; $('hover').style.display = 'none'; });
+
+/* ---------- Ton ---------- */
+let audio = null, muted = localStorage.getItem('fq_mute') === '1', lastTick = 0;
+$('mute').textContent = muted ? '🔇' : '🔊';
+function beep(freq, at, dur, vol, type) {
+  if (!audio || muted) return;
+  const o = audio.createOscillator(), a = audio.createGain(), t = audio.currentTime + at;
+  o.type = type || 'square'; o.frequency.value = freq;
+  a.gain.setValueAtTime(vol, t); a.gain.exponentialRampToValueAtTime(.0001, t + dur);
+  o.connect(a).connect(audio.destination); o.start(t); o.stop(t + dur);
+}
+function sfxTick() { const n = performance.now(); if (n - lastTick < 90) return; lastTick = n; beep(880, 0, .05, .018); }
+function sfxWin() { [523, 659, 784, 1047].forEach((f, i) => beep(f, i * .11, .22, .06)); }
+$('mute').onclick = () => { muted = !muted; localStorage.setItem('fq_mute', muted ? '1' : '0'); $('mute').textContent = muted ? '🔇' : '🔊'; };
+
+/* ---------- Bedienung ---------- */
+$('tipBtn').onclick = () => { const t = $('tip'); t.style.display = t.style.display === 'block' ? 'none' : 'block'; };
+$('solBtn').onclick = () => { if (confirm('Wirklich die Lösung anzeigen? Dein Code wird ersetzt. Besser erst selbst probieren!')) cm.setValue(LEVELS[cur].solution); };
+$('resetBtn').onclick = () => { if (confirm('Code auf den Anfang zurücksetzen?')) cm.setValue(LEVELS[cur].start); };
+$('replayBtn').onclick = replay;
+$('nextInline').onclick = () => loadLevel(cur + 1);
+document.querySelectorAll('.spd').forEach(b => b.onclick = () => {
+  speed = +b.dataset.s;
+  document.querySelectorAll('.spd').forEach(x => x.classList.toggle('on', x === b));
+  if (playing) t0 = performance.now() - fiNow / (30 * speed) * 1000;
+});
+$('startBtn').onclick = () => {
+  audio = new (window.AudioContext || window.webkitAudioContext)();
+  $('startScreen').classList.remove('show');
+  geo = null; cm.refresh(); cm.focus(); execute();
+};
+
+/* ---------- Start ---------- */
+let first = 0; while (first < LEVELS.length - 1 && isSolved(first)) first++;
+loadLevel(first);
+requestAnimationFrame(draw);
+loadPyodide().then(py => {
+  py.runPython($('runner').textContent);
+  runFn = py.globals.get('run');
+  setRunState('✓ Bereit', 'ok');
+  const b = $('startBtn'); b.disabled = false;
+  b.textContent = Object.keys(stars).length ? 'Weiterspielen' : 'Schicht starten';
+}).catch(e => { $('startBtn').textContent = 'Python konnte nicht geladen werden (Internet nötig)'; console.error(e); });
+</script>
+</body>
+</html>
