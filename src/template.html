@@ -364,7 +364,7 @@
 
 <div class="overlay" id="shopScreen"><div class="plate" id="shopPlate">
   <div id="shopHead"><h2>🏗 Basis &amp; Shop</h2><button class="ghostbtn" id="shopClose" style="margin:0">Schließen</button></div>
-  <div id="shopNote">Rohstoffe verdienst du mit Aufträgen. Zu wenig? Wiederhole einen geschafften Auftrag für die halbe Belohnung. Gebäude kannst du überall hinstellen und auf der Karte per Klick versetzen.</div>
+  <div id="shopNote">Welt 2 bringt ihre Ausrüstung selbst mit, der Shop ist für Welt 1. Rohstoffe verdienst du mit Aufträgen. Zu wenig? Wiederhole einen geschafften Auftrag für die halbe Belohnung. Gebäude kannst du überall hinstellen und auf der Karte per Klick versetzen.</div>
   <div id="shopBank"></div>
   <div id="shopList"></div>
 </div></div>
@@ -431,15 +431,19 @@ function saveGame() {
 const CMD_BASE = ['rechts','links','hoch','runter','hacke','abliefern'];
 const CMD_BY = { saegewerk:['verarbeite','zum_werk','zum_lager'], ofen:['verarbeite','zum_werk','zum_lager'], spitzhacke:['abbauen','was_ist_hier'], karte:['finde','gehe_zu'],
   lagerbuch:['im_lager'], montage:['hole','baue','zum_werk','zum_lager'] };
-const currentCmds = () => [...new Set([...CMD_BASE, ...[...owned].flatMap(id => CMD_BY[id] || [])])];
+// In Welt 2 ist alles schon da, was ihre Level brauchen. In Welt 1 muss man es im Shop kaufen.
+const FREI2 = new Set(LEVELS.filter(lv => lv.welt === 2).flatMap(lv => lv.braucht || []));
+const has = id => owned.has(id) || (welt(cur) === 2 && FREI2.has(id));
+const ownedNow = () => [...new Set([...owned, ...(welt(cur) === 2 ? FREI2 : [])])];
+const currentCmds = () => [...new Set([...CMD_BASE, ...ownedNow().flatMap(id => CMD_BY[id] || [])])];
 const capacity = () => LEVELS[cur].tragkraft + (owned.has('rucksack') ? 1 : 0);
 const plots = { saegewerk:[1,1], ofen:[1,5], montage:[0,1], holzhuette:[0,0], steinhuette:[0,6], ...JSON.parse(store.getItem('rq3_plots') || '{}') };
-const payload = () => ({ ...LEVELS[cur], tragkraft: capacity(), owned: [...owned], plots });
+const payload = () => ({ ...LEVELS[cur], tragkraft: capacity(), owned: ownedNow(), plots });
 const PLOTS = [
   { id:'saegewerk', name:'Sägewerk' }, { id:'ofen', name:'Schmelzofen' }, { id:'montage', name:'Montagehalle' },
   { id:'holzhuette', name:'Holzfäller-Hütte' }, { id:'steinhuette', name:'Steinbruch-Hütte' },
 ];
-const plotAt = (x, y) => PLOTS.find(p => owned.has(p.id) && plots[p.id][0] === x && plots[p.id][1] === y);
+const plotAt = (x, y) => PLOTS.find(p => has(p.id) && plots[p.id][0] === x && plots[p.id][1] === y);
 
 function buildTrack() {
   const el = $('track'); el.innerHTML = '';
@@ -447,8 +451,6 @@ function buildTrack() {
   [[1, '🌲 Welt 1', 0], [2, '🏭 Welt 2', start2]].forEach(([n, label, start]) => {
     const b = document.createElement('button');
     b.className = 'wtab' + (n === w ? ' on' : ''); b.textContent = label;
-    b.disabled = n === 2 && !isSolved(start2 - 1);
-    b.title = b.disabled ? 'Schaffe zuerst Welt 1' : '';
     b.onclick = () => {
       if (n === w) return;
       let j = start; while (j < LEVELS.length - 1 && welt(j + 1) === n && isSolved(j)) j++;
@@ -462,7 +464,7 @@ function buildTrack() {
     const b = document.createElement('button');
     b.className = 'node' + (i === cur ? ' cur' : '') + (isSolved(i) ? ' done' : '');
     b.title = lv.title;
-    b.disabled = !(i === 0 || isSolved(i - 1) || isSolved(i));
+    b.disabled = !(i === 0 || welt(i - 1) !== w || isSolved(i - 1) || isSolved(i));   // jede Welt beginnt offen
     b.innerHTML = (i + 1) + (isSolved(i) ? `<small>${'★'.repeat(stars[i])}</small>` : '');
     b.onclick = () => loadLevel(i);
     el.appendChild(b);
@@ -812,13 +814,13 @@ function renderBank() {
   $('shopBtn').classList.toggle('attn', SHOP.some(it => it.level !== null && it.level <= reach + 1 && !owned.has(it.id) && canBuy(it)));
 }
 function renderLock() {
-  const miss = (LEVELS[cur].braucht || []).filter(id => !owned.has(id));
+  const miss = (LEVELS[cur].braucht || []).filter(id => !has(id));
   $('lockBanner').style.display = miss.length ? 'flex' : 'none';
   $('lockText').textContent = '🔒 Dafür brauchst du noch: ' + miss.map(id => SHOP.find(it => it.id === id).name).join(', ');
 }
 function renderShop() {
   const list = $('shopList'); list.innerHTML = '';
-  SHOP.forEach(it => {
+  SHOP.filter(it => it.welt !== 2).forEach(it => {
     const have = owned.has(it.id), c = document.createElement('div');
     c.className = 'card' + (have ? ' have' : it.level !== null ? ' need' : '');
     const cost = Object.entries(it.preis).map(([k, v]) => `<span class="cost ${(bank[k] || 0) < v ? 'short' : ''}">${v} ${WARE[k].icon}</span>`).join(' ');
@@ -1273,7 +1275,7 @@ function draw(now) {
   // von oben nach unten zeichnen, damit Vordergrund vorne liegt
   for (let y = 0; y < H; y++) {
     PLOTS.forEach(p => {
-      if (!owned.has(p.id) || plots[p.id][1] !== y) return;
+      if (!has(p.id) || plots[p.id][1] !== y) return;
       const x = plots[p.id][0], covered = state.left[x + ',' + y] > 0;   // ein Rohstoff steht davor
       g.save(); g.globalAlpha = covered ? .45 : 1; g.translate(x * c + c / 2, y * c + c / 2); drawPlot(p.id, c); g.restore();
     });
@@ -1379,7 +1381,7 @@ function chatContext() {
   const lv = LEVELS[cur], plain = h => { const d = document.createElement('div'); d.innerHTML = h; return d.textContent; };
   const code = cm.getValue().split('\n').map((l, i) => `${i + 1}: ${l}`).join('\n');
   const checks = [...$('checks').children].map(c => c.textContent).join(', ');
-  const gebaut = PLOTS.filter(p => owned.has(p.id)).map(p => `${p.name} auf (${plots[p.id][0]}, ${plots[p.id][1]})`).join(', ') || 'noch keine';
+  const gebaut = PLOTS.filter(p => has(p.id)).map(p => `${p.name} auf (${plots[p.id][0]}, ${plots[p.id][1]})`).join(', ') || 'noch keine';
   return `Du bist der freundliche Python-Tutor im Lernspiel Rohstoff-Quest. Die Person lernt gerade Python-Grundlagen. Sie schreibt Code, der einen Mitarbeiter auf einer Karte steuert.
 
 Regeln für deine Antwort:

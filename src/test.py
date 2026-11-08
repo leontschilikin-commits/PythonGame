@@ -5,6 +5,14 @@ from levels import LEVELS, SHOP
 from minimum import minimum
 
 ALLE = [s["id"] for s in SHOP]
+FREI2 = sorted({k for lv in LEVELS if lv.get("welt") == 2 for k in lv.get("braucht", [])})
+
+
+def noetig(i):
+    """Was das Spiel in Level i besitzt, wenn man nur Pflichtkäufe macht. Welt 2 bringt ihre Ausrüstung mit."""
+    if LEVELS[i].get("welt") == 2:
+        return FREI2
+    return [s["id"] for s in SHOP if s["level"] is not None and s["level"] <= i]
 bad = 0
 
 
@@ -15,7 +23,7 @@ def go(i, code, owned=None):
 
 print("--- Lösungen, nur mit den für das Level nötigen Käufen")
 for i, lv in enumerate(LEVELS):
-    nur_noetig = [s["id"] for s in SHOP if s["level"] is not None and s["level"] <= i]
+    nur_noetig = noetig(i)
     r = go(i, lv["solution"], nur_noetig)
     s = go(i, lv["start"], nur_noetig)
     print(i + 1, lv["title"], "won=", r["won"], "aktionen=", len(r["events"]), "err=", r["error"], "| start won=", s["won"], s["error"])
@@ -68,7 +76,7 @@ for name, plots in faelle:
 print("--- Effizienteste Lösungen: gewinnen mit Pflichtkäufen und erreichen das Aktions-Minimum, auch bei anderem Bauplan")
 for i, lv in enumerate(LEVELS):
     if lv.get("welt") == 2:                 # Montage und Lagerbestand kennt die Breitensuche nicht
-        nur_noetig = [s["id"] for s in SHOP if s["level"] is not None and s["level"] <= i]
+        nur_noetig = noetig(i)
         muster = len(go(i, lv["solution"])["events"])
         teile = []
         for plots in ({}, {"saegewerk": [9, 0], "ofen": [9, 6], "montage": [5, 3]}):
@@ -78,7 +86,7 @@ for i, lv in enumerate(LEVELS):
             bad += not ok
         print(i + 1, "Welt 2, Muster", muster, "Aktionen, beste:", ", ".join(teile), "minimal" if lv["minimal"] else "")
         continue
-    nur_noetig = [s["id"] for s in SHOP if s["level"] is not None and s["level"] <= i]
+    nur_noetig = noetig(i)
     zeilen = len([l for l in lv["beste"].splitlines() if l.strip()])
     teile = []
     for plots in ({"saegewerk": [1, 1], "ofen": [1, 5]}, {"saegewerk": [9, 0], "ofen": [9, 6]}, {"saegewerk": [5, 3], "ofen": [5, 1]}):
