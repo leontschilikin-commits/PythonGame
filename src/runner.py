@@ -1,18 +1,24 @@
-import io, re, json, sys, traceback, contextlib
+import io, re, json, sys, copy, traceback, contextlib
 
 MAX_LINES = 200000
 MAX_ACTIONS = 3000
 DIRS = {"rechts": (1, 0), "links": (-1, 0), "hoch": (0, -1), "runter": (0, 1)}
 # Feldzeichen -> (Name auf der Karte, Ware)
 TILES = {"T": ("baum", "holz"), "S": ("stein", "stein"), "I": ("eisen", "eisen"),
-         "G": ("gold", "gold"), "D": ("diamant", "diamant")}
+         "G": ("gold", "gold"), "D": ("diamant", "diamant"), "C": ("kupfer", "kupfer")}
 # Gebäude: was sie verarbeiten und wo sie stehen, wenn das Level nichts anderes sagt
-WERKE = {"saegewerk": ("holz", "brett"), "ofen": ("eisen", "stahl")}
-STANDARD = {"saegewerk": (1, 1), "ofen": (1, 5)}
+WERKE = {"saegewerk": {"holz": "brett"}, "ofen": {"eisen": "stahl", "kupfer": "draht"}}
+STANDARD = {"saegewerk": (1, 1), "ofen": (1, 5), "montage": (0, 1)}
+# Welt 2: Was die Montagehalle aus welchen Teilen baut
+REZEPTE = {"werkzeug": {"brett": 1, "stahl": 1}, "kiste": {"brett": 2}, "kabel": {"draht": 2},
+           "motor": {"stahl": 1, "draht": 1}, "roboter": {"motor": 1, "kabel": 1, "stahl": 1}}
 # Befehl -> Kauf, der ihn freischaltet
 FREI = {"abbauen": ("spitzhacke", "die Spitzhacke"), "was_ist_hier": ("spitzhacke", "die Spitzhacke"),
         "finde": ("karte", "die Karte"), "gehe_zu": ("karte", "die Karte"), "zum_lager": ("saegewerk", "das Sägewerk"),
-        "zum_werk": ("saegewerk", "das Sägewerk"), "verarbeite": ("saegewerk", "das Sägewerk")}
+        "zum_werk": ("saegewerk", "das Sägewerk"), "verarbeite": ("saegewerk", "das Sägewerk"),
+        "im_lager": ("lagerbuch", "das Lagerbuch"), "hole": ("montage", "die Montagehalle"), "baue": ("montage", "die Montagehalle")}
+# Diese Werte darf ein Level je Variante austauschen
+VARIABEL = ("grid", "mengen", "lager", "rezepte", "vars", "ziel")
 
 
 class Fehler(Exception):
@@ -33,13 +39,36 @@ def erklaere(msg):
 
 def run(code, level_json):
     level = json.loads(level_json)
+    r = _run(code, level)
+    tests = level.get("varianten")
+    if tests and "events" in r:
+        hinweis = None
+        if r["error"] is None and r["reached"]:
+            for v in tests:
+                t = _run(code, dict(level, **{k: v[k] for k in VARIABEL if k in v}))
+                if t["error"] is not None or not t["reached"]:
+                    grund = ("Fehler: " + t["error"]["msg"]) if t["error"] else "Am Ende sind %s." % t["fehlt"]
+                    hinweis = "Der Auftrag auf der Karte klappt. Dein Code muss aber auch bei anderen Aufträgen funktionieren.\nTest „%s“: %s" % (v["text"], grund)
+                    break
+            ok = hinweis is None
+        else:
+            ok = False
+        r["checks"].append({"label": "Klappt auch bei anderen Aufträgen (%d Tests)" % len(tests), "ok": ok})
+        r["won"] = r["won"] and ok
+        r["hinweis"] = hinweis
+    r.pop("fehlt", None)
+    return json.dumps(r)
+
+
+def _run(code, level):
     rows = level["grid"]
     H, W = len(rows), len(rows[0])
     capacity = level["tragkraft"]
     owned = set(level.get("owned", []))
     mengen = level.get("mengen", {})
     plaetze = dict(STANDARD, **level.get("plots", {}))
-    werke = {tuple(plaetze[w]): w for w in WERKE if w in owned}
+    werke = {tuple(plaetze[w]): w for w in list(WERKE) + ["montage"] if w in owned}
+    rezepte = level.get("rezepte", REZEPTE)
     left = {}
     lager = None
     for y, row in enumerate(rows):
@@ -51,7 +80,7 @@ def run(code, level_json):
 
     pos = list(lager)
     carry = []
-    stock = {}
+    stock = dict(level.get("lager", {}))
     events = []
 
     def add(ev):
@@ -94,7 +123,7 @@ def run(code, level_json):
         name = here()
         if name == "baum":
             take("hack")
-        elif name in ("stein", "eisen", "gold", "diamant"):
+        elif name in ("stein", "eisen", "gold", "diamant", "kupfer"):
             raise Fehler("Hier ist %s, kein Baum. Dafür brauchst du abbauen()." % name)
         else:
             raise Fehler("Hier steht kein Baum. Dein Mitarbeiter steht auf (%d, %d)." % (pos[0], pos[1]))
@@ -107,7 +136,9 @@ def run(code, level_json):
             raise Fehler("Für Gold brauchst du das Goldsieb. Kauf es im Shop.")
         if name == "diamant" and "bohrer" not in owned:
             raise Fehler("Für Diamanten brauchst du den Diamantbohrer. Kauf ihn im Shop.")
-        if name in ("stein", "eisen", "gold", "diamant"):
+        if name == "kupfer" and "tiegel" not in owned:
+            raise Fehler("Für Kupfer brauchst du den Kupfertiegel. Kauf ihn im Shop.")
+        if name in ("stein", "eisen", "gold", "diamant", "kupfer"):
             take("mine")
         else:
             raise Fehler("Hier gibt es nichts abzubauen. Dein Mitarbeiter steht auf (%d, %d)." % (pos[0], pos[1]))
@@ -116,10 +147,12 @@ def run(code, level_json):
         p = (pos[0], pos[1])
         if p not in werke:
             raise Fehler("Hier steht kein Werk. Mit zum_werk(\"saegewerk\") oder zum_werk(\"ofen\") kommst du hin. Dein Mitarbeiter steht auf (%d, %d)." % p)
-        roh, fertig = WERKE[werke[p]]
-        if roh not in carry:
-            raise Fehler("Dein Mitarbeiter trägt nichts, was hier verarbeitet werden kann. Dieses Werk braucht %s." % roh)
-        carry[:] = [fertig if w == roh else w for w in carry]
+        if werke[p] == "montage":
+            raise Fehler("In der Montagehalle wird nicht verarbeitet, sondern gebaut: baue(\"werkzeug\") zum Beispiel.")
+        plan = WERKE[werke[p]]
+        if not any(w in plan for w in carry):
+            raise Fehler("Dein Mitarbeiter trägt nichts, was hier verarbeitet werden kann. Dieses Werk braucht %s." % " oder ".join(plan))
+        carry[:] = [plan.get(w, w) for w in carry]
         add(["process", p[0], p[1], list(carry)])
 
     def abliefern():
@@ -132,6 +165,38 @@ def run(code, level_json):
 
     def was_ist_hier():
         return here()
+
+    def im_lager(ware):
+        return stock.get(ware, 0)
+
+    def hole(ware):
+        if here() != "lager":
+            raise Fehler("hole() geht nur im Lager. Dein Mitarbeiter steht auf (%d, %d)." % (pos[0], pos[1]))
+        if stock.get(ware, 0) <= 0:
+            raise Fehler("Im Lager liegt nichts mehr von \"%s\". Mit im_lager(\"%s\") kannst du vorher nachsehen." % (ware, ware))
+        if len(carry) >= capacity:
+            raise Fehler("Die Hände sind voll, mehr als %d kann dein Mitarbeiter nicht tragen." % capacity)
+        stock[ware] -= 1
+        carry.append(ware)
+        add(["take", ware])
+
+    def baue(produkt):
+        p = (pos[0], pos[1])
+        if werke.get(p) != "montage":
+            raise Fehler("baue() geht nur in der Montagehalle. Mit zum_werk(\"montage\") kommst du hin. Dein Mitarbeiter steht auf (%d, %d)." % p)
+        if produkt not in rezepte:
+            raise Fehler("Für %r gibt es kein Rezept. Bekannt sind: %s" % (produkt, ", ".join('"%s"' % n for n in rezepte)))
+        rest, fehlt = list(carry), []
+        for ware, menge in rezepte[produkt].items():
+            for i in range(menge):
+                if ware in rest:
+                    rest.remove(ware)
+                else:
+                    fehlt.append(ware)
+        if fehlt:
+            raise Fehler("Für %s fehlt noch: %s. Dein Mitarbeiter trägt: %s" % (produkt, ", ".join(fehlt), ", ".join(carry) or "nichts"))
+        carry[:] = rest + [produkt]
+        add(["build", p[0], p[1], list(carry), produkt])
 
     def finde(art):
         names = [v[0] for v in TILES.values()]
@@ -152,14 +217,15 @@ def run(code, level_json):
         gehe_zu(lager[0], lager[1])
 
     def zum_werk(name):
-        if name not in WERKE:
-            raise Fehler('zum_werk kennt nur: "saegewerk", "ofen"')
+        if name not in ("saegewerk", "ofen", "montage"):
+            raise Fehler('zum_werk kennt nur: "saegewerk", "ofen", "montage"')
         if name not in owned:
             raise Fehler("Du hast noch kein Gebäude %s. Kauf es im Shop." % name)
         gehe_zu(*plaetze[name])
 
     commands = {"zum_werk": zum_werk, "hacke": hacke, "abliefern": abliefern, "abbauen": abbauen, "was_ist_hier": was_ist_hier,
-                "finde": finde, "gehe_zu": gehe_zu, "zum_lager": zum_lager, "verarbeite": verarbeite}
+                "finde": finde, "gehe_zu": gehe_zu, "zum_lager": zum_lager, "verarbeite": verarbeite,
+                "im_lager": im_lager, "hole": hole, "baue": baue}
     for d in DIRS:
         commands[d] = make_step(d)
 
@@ -168,10 +234,11 @@ def run(code, level_json):
             raise Fehler("%s() ist noch gesperrt. Kauf erst %s im Shop." % (name, item))
         return f
 
-    env = {"__name__": "__firma__"}
+    env = {"__name__": "__firma__", "rezepte": copy.deepcopy(rezepte)}
+    env.update(copy.deepcopy(level.get("vars", {})))
     for name, fn in commands.items():
         if name in FREI and FREI[name][0] not in owned:
-            if FREI[name][0] == "saegewerk" and "ofen" in owned:
+            if FREI[name][0] == "saegewerk" and ("ofen" in owned or "montage" in owned):
                 env[name] = fn
             else:
                 env[name] = locked(name, FREI[name][1])
@@ -197,8 +264,8 @@ def run(code, level_json):
     try:
         compiled = compile(code, "<firma>", "exec")
     except SyntaxError as e:
-        return json.dumps({"error": {"kind": "syntax", "line": e.lineno, "msg": "%s: %s" % (type(e).__name__, erklaere(e.msg))},
-                           "output": "", "won": False})
+        return {"error": {"kind": "syntax", "line": e.lineno, "msg": "%s: %s" % (type(e).__name__, erklaere(e.msg))},
+                "output": "", "won": False}
 
     sys.settrace(tracer)
     try:
@@ -223,7 +290,11 @@ def run(code, level_json):
     checks = []
     for n in level.get("needs", []):
         checks.append({"label": n["label"], "ok": bool(re.search(n["pattern"], plain, re.M))})
-    reached = all(stock.get(k, 0) >= v for k, v in level["ziel"].items())
+    exakt = level.get("exakt")
+    reached = all(stock.get(k, 0) == v if exakt else stock.get(k, 0) >= v for k, v in level["ziel"].items())
+    fehlt = ", ".join("%d %s im Lager statt %s%d" % (stock.get(k, 0), k, "genau " if exakt else "", v)
+                      for k, v in level["ziel"].items() if stock.get(k, 0) != v and (exakt or stock.get(k, 0) < v))
+    zuviel = [k for k, v in level["ziel"].items() if exakt and stock.get(k, 0) > v]
     won = reached and error is None and all(c["ok"] for c in checks)
-    return json.dumps({"error": error, "output": output, "checks": checks, "won": won, "reached": reached,
-                       "events": events, "start": list(lager), "carried": len(carry)})
+    return {"error": error, "output": output, "checks": checks, "won": won, "reached": reached, "zuviel": zuviel,
+            "events": events, "start": list(lager), "carried": len(carry), "fehlt": fehlt}

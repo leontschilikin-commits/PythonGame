@@ -48,11 +48,14 @@ print("Pflicht-Level:", sorted(s["level"] + 1 for s in kaeufe.values()), "alle b
       all(set(lv.get("braucht", [])) <= {s["id"] for s in SHOP} for lv in LEVELS))
 
 print("--- Freier Bauplatz: jede Lösung gewinnt, auch wenn Werke auf Rohstoffen oder in Ecken stehen")
-faelle = [("Ecken", {"saegewerk": [9, 0], "ofen": [0, 6]}), ("rechts", {"saegewerk": [9, 6], "ofen": [9, 5]})]
+faelle = [("Ecken", {"saegewerk": [9, 0], "ofen": [0, 6], "montage": [9, 3]}), ("rechts", {"saegewerk": [9, 6], "ofen": [9, 5], "montage": [5, 3]})]
 for i, lv in enumerate(LEVELS):
-    f = [(x, y) for y, r in enumerate(lv["grid"]) for x, c in enumerate(r) if c in "TSIGD"]
+    f = [(x, y) for y, r in enumerate(lv["grid"]) for x, c in enumerate(r) if c in "TSIGDC"]
     if len(f) > 1:
-        faelle.append(("auf Rohstoff L%d" % (i + 1), {"saegewerk": list(f[0]), "ofen": list(f[-1])}))
+        plots = {"saegewerk": list(f[0]), "ofen": list(f[-1])}
+        if len(f) > 2:
+            plots["montage"] = list(f[len(f) // 2])
+        faelle.append(("auf Rohstoff L%d" % (i + 1), plots))
 for name, plots in faelle:
     fehl = []
     for i, lv in enumerate(LEVELS):
@@ -64,6 +67,17 @@ for name, plots in faelle:
 
 print("--- Effizienteste Lösungen: gewinnen mit Pflichtkäufen und erreichen das Aktions-Minimum, auch bei anderem Bauplan")
 for i, lv in enumerate(LEVELS):
+    if lv.get("welt") == 2:                 # Montage und Lagerbestand kennt die Breitensuche nicht
+        nur_noetig = [s["id"] for s in SHOP if s["level"] is not None and s["level"] <= i]
+        muster = len(go(i, lv["solution"])["events"])
+        teile = []
+        for plots in ({}, {"saegewerk": [9, 0], "ofen": [9, 6], "montage": [5, 3]}):
+            r = json.loads(run(lv["beste"], json.dumps(dict(lv, owned=nur_noetig, plots=plots))))
+            ok = r["won"] and (plots or len(r["events"]) <= muster)
+            teile.append("%d%s" % (len(r["events"]), "" if ok else " FEHLER %s %s" % (r["error"], r.get("hinweis"))))
+            bad += not ok
+        print(i + 1, "Welt 2, Muster", muster, "Aktionen, beste:", ", ".join(teile), "minimal" if lv["minimal"] else "")
+        continue
     nur_noetig = [s["id"] for s in SHOP if s["level"] is not None and s["level"] <= i]
     zeilen = len([l for l in lv["beste"].splitlines() if l.strip()])
     teile = []
@@ -78,7 +92,9 @@ for i, lv in enumerate(LEVELS):
 print("--- Fehlerfälle")
 for i, c in [(0, "hacke()"), (0, "abbauen()"), (0, "verarbeite()"), (0, "while True:\n    pass"), (4, "verarbeite()"),
              (4, "hoch()\nhoch()\nrechts()\nverarbeite()"), (7, "gehe_zu(1, 5)\nverarbeite()"), (6, "hacke()\nhacke()"),
-             (4, 'zum_werk("ofen")'), (7, 'zum_werk("bla")')]:
+             (4, 'zum_werk("ofen")'), (7, 'zum_werk("bla")'), (14, 'hole("gold")\nhole("gold")\nhole("gold")'),
+             (14, 'baue("werkzeug")'), (14, 'zum_werk("montage")\nbaue("werkzeug")'), (14, 'hole("brett")\nzum_werk("montage")\nbaue("auto")'),
+             (14, 'zum_werk("montage")\nverarbeite()'), (12, 'im_lager("brett")\nhole("brett")')]:
     r = go(i, c)
     print(i + 1, repr(c[:34]), "->", (r["error"] or {}).get("msg"))
 sys.exit(bad)

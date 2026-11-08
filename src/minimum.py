@@ -19,7 +19,7 @@ def minimum(lv, plaetze=STANDARD):
             elif c in TILES:
                 felder.append((x, y, TILES[c][1], lv.get("mengen", {}).get(c, 1)))
     index = {(f[0], f[1]): i for i, f in enumerate(felder)}
-    werke = {tuple(p): WERKE[w] for w, p in plaetze.items()}
+    werke = {tuple(p): WERKE[w] for w, p in plaetze.items() if w in WERKE}
     ziel = lv["ziel"]
     start = (lager, tuple(f[3] for f in felder), (), ())
     seen = {start}
@@ -38,9 +38,8 @@ def minimum(lv, plaetze=STANDARD):
         if i is not None and left[i] > 0 and len(carry) < lv["tragkraft"]:
             l = list(left); l[i] -= 1
             nxt.append((pos, tuple(l), tuple(sorted(carry + (felder[i][2],))), stock))
-        if pos in werke and werke[pos][0] in carry:
-            roh, fertig = werke[pos]
-            nxt.append((pos, left, tuple(sorted(fertig if w == roh else w for w in carry)), stock))
+        if pos in werke and any(w in werke[pos] for w in carry):
+            nxt.append((pos, left, tuple(sorted(werke[pos].get(w, w) for w in carry)), stock))
         if pos == lager and carry:
             s = dict(stock)
             for w in carry:
